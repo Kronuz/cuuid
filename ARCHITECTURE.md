@@ -34,5 +34,5 @@ The wire format is an invariant. Do not change tags, bit layout, byte order, or 
 ## Invariants and suspected pre-existing bugs
 
 - **Byte-identical wire format.** Existing serialised UUIDs must continue to decode, and newly encoded UUIDs must match the original Xapiand encoding.
-- **Faithful node salt expression.** The original code mixed the local-node hash with `node` using logical OR (`||`), not bitwise OR (`|`). This extraction keeps that exact expression. It is probably a latent bug because the node value collapses to a boolean before hashing, but fixing it would change compacted UUID output and belongs in a separate, measured change.
+- **Node salt uses bitwise OR (fixed, breaking).** `compact_crush()` computes the salt as `fnv_1a((local_node_hash | node))`. The Xapiand original used logical OR (`||`), collapsing `node` to a boolean before hashing, so every non-zero node produced one salt value. Fixed to bitwise `|` here; this changes newly-compacted UUID salt bits versus older versions (a deliberate breaking change), while reading previously-stored condensed UUIDs is unaffected.
 - **No hard Xapiand dependency.** Logging, exceptions, and node identity remain optional compile-time seams.

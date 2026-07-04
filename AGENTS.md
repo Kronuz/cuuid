@@ -32,7 +32,14 @@ benchmarks/serialise_parse.cc   Small serialise/parse throughput harness.
 
 ## Invariants / suspected pre-existing bugs
 
-- **Node salt uses logical OR.** `UUID::compact_crush()` hashes `(local_node_hash || node)`. That is a logical OR, not a bitwise OR, so most non-zero inputs collapse to `true` before hashing. This is almost certainly suspicious, but it is preserved verbatim to avoid changing compacted UUID output during extraction. Review and fix separately if desired.
+- **[FIXED, breaking] Node salt now uses bitwise OR.** `UUID::compact_crush()` computes the
+  compacted-UUID salt as `fnv_1a((local_node_hash | node))`. The Xapiand original used a
+  logical OR (`||`), which collapsed the node to a boolean before hashing, so every non-zero
+  node produced the SAME salt (a compiler `-Wconstant-logical-operand` warning even flags it).
+  Reproduced: over 200k distinct nodes the `||` form yields 1 distinct salt; `|` yields the full
+  128-bucket spread. Fixed here. This CHANGES the salt bits of newly-compacted v1 UUIDs versus
+  older versions (a deliberate breaking change for the version bump); reading previously-stored
+  condensed UUIDs is unaffected (the stored salt is read back as-is).
 
 ## Build / test
 

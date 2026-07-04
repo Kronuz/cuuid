@@ -593,7 +593,7 @@ UUID::compact_crush()
 			condenser.compact.salt = node & SALT_MASK;
 		} else {
 			auto lnh = ::cuuid::local_node_hash();
-			auto salt = fnv_1a((lnh ? *lnh : 0) || node); // WARNING: faithfully preserved logical OR; review whether this should be bitwise |.
+			auto salt = fnv_1a((lnh ? *lnh : 0) | node); // bitwise OR mixes the node identity into the salt. (Was `|| node` in Xapiand -- a logical OR that collapsed every non-zero node to a single salt; fixed here, which changes newly-compacted v1 UUID salt bits vs older versions.)
 			salt = xor_fold(salt, SALT_BITS);
 			condenser.compact.salt = salt & SALT_MASK;
 		}
