@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <exception>
 #include <iterator>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -99,12 +100,33 @@ static void test_generator() {
 	CHECK(UUID::unserialise(uuid.serialise()) == uuid);
 }
 
+// The generator must not collide, and every generated value must survive a
+// serialise/unserialise round trip -- in both the full (compact=false) and
+// compactable (compact=true) modes. Ported from Xapiand's oldtests uuid suite,
+// which checked uniqueness in bulk rather than for a single value.
+static void test_generator_uniqueness() {
+	UUIDGenerator generator;
+	const int N = 2000;
+	for (bool compact : {false, true}) {
+		std::set<std::string> seen;
+		for (int i = 0; i < N; ++i) {
+			UUID uuid = generator(compact);
+			CHECK(!uuid.empty());
+			const std::string serialised = uuid.serialise();
+			CHECK(UUID::unserialise(serialised) == uuid);   // round-trips
+			seen.insert(serialised);
+		}
+		CHECK(seen.size() == static_cast<size_t>(N));        // all distinct
+	}
+}
+
 int main() {
 	test_string_round_trip();
 	test_full_serialise_round_trip();
 	test_condensed_serialise_round_trip();
 	test_uuid1_fields();
 	test_generator();
+	test_generator_uniqueness();
 
 	if (failures != 0) {
 		std::fprintf(stderr, "%d check(s) failed\n", failures);
