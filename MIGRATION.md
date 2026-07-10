@@ -1,4 +1,4 @@
-# Making v2 the default, v1 the legacy (a migration plan)
+# Making wisp the default, cuuid the legacy (a migration plan)
 
 **Author:** [German Mendez Bravo](mailto:german.mb@gmail.com)
 **Date:** 2026-07-10
@@ -6,45 +6,43 @@
 
 ## TL;DR
 
-Ship v2 as a second codec next to v1, generate v2 for all new ids, and keep v1 as a read-only legacy decoder. Version the format **per database / per schema, out of band**, not with an in-band tag byte, because a byte-level tag provably cannot work (see below). New databases are v2-only; existing databases stay v1 and are either migrated by re-indexing or left to age out. Once no live database is v1, delete the v1 codec (its Mersenne Twister with it). No id ever changes representation in place, so nothing already on disk breaks.
+Ship the successor as its own library, [`wisp`](WISP_SPEC.md) (working name), and keep [`cuuid`](https://github.com/Kronuz/cuuid) frozen as the read-only legacy. Xapiand defaults **new** databases to `wisp` and offers a `--legacy-cuuid` opt-out; existing `cuuid` databases keep working and are detected automatically from their metadata. Version lives **per database, out of band**, never as an in-band wire byte, because a byte-level tag provably cannot work (below) and because every wire byte hurts. New databases are `wisp`-only; old ones stay `cuuid` and are migrated by re-indexing or left to age out. Once no live database is `cuuid`, delete the `cuuid` dependency (its Mersenne Twister with it). No id ever changes representation in place, so nothing already on disk breaks.
 
 ## The one constraint that shapes everything
 
-We proved earlier that you cannot distinguish v1 and v2 by the wire's first byte. v1 uses **255 of the 256** first-byte values; the only free one is `0x00`, and `0x00` is exactly the byte base59 (Xapiand's `~` text form) drops. So there is no leading tag that is both v1-safe and text-safe. Versioning therefore lives **outside the id's bytes**: in the database/schema metadata for stored ids, and in a distinct text prefix for the `~` form. This is standard practice (it is how Xapian already versions glass vs honey), and it is cleaner than any bit-stealing scheme.
+We proved earlier that you cannot distinguish two id formats by the wire's first byte. `cuuid` uses **255 of the 256** first-byte values; the only free one is `0x00`, and `0x00` is exactly the byte base59 (the `~` text form) drops. So there is no leading tag that is both cuuid-safe and text-safe, and adding a version byte to `wisp` would also violate the "every stored byte hurts" rule. Versioning therefore lives **outside the id's bytes**: in the database/schema metadata for stored ids, and in each library's distinct text sentinel for the text form. This is standard practice (it is how Xapian already versions glass vs honey), and it is cleaner and cheaper than any bit-stealing scheme.
 
-A consequence worth stating up front: we do **not** support mixing v1 and v2 ids inside one database. Each database is version-pure. That removes all the hard cases.
+A consequence worth stating up front: we do **not** support mixing `cuuid` and `wisp` ids inside one database. Each database is format-pure. That removes all the hard cases.
 
-## cuuid (the library)
+## The two libraries
 
-1. **Keep v1 byte-for-byte.** `uuid.{hh,cc}` stays as it is, Mersenne Twister and all. v1 is frozen; it only ever reads and writes what it always did.
-2. **Add the v2 codec beside it**, ported from `prototype/cuuid_v2.hh`: UUIDv6 canonical, splitmix64 node reconstruction, millisecond-since-2026 timestamp, variable-length wire. Select the codec with an explicit `format` enum (`V1`, `V2`), never by guessing from bytes.
-3. **Generator defaults to v2.** `UUIDGenerator` mints v2 ids for new work; a legacy flag can still produce v1 if some caller genuinely needs it during the transition.
-4. **`serialise(format)` / `unserialise(bytes, format)` take the version explicitly.** The caller supplies it from context (the database's format version). There is no in-band sniffing.
-5. **Text form.** v1 keeps `~` + base59. v2 gets its **own sentinel** (a different leading character) so a bare text id is self-describing regardless of which database it came from. Both are base59 of a nonzero-first-byte wire, so both round-trip through text.
-6. **Port to all three languages.** The wire is a C++/Python/JavaScript contract. Port the v2 codec to the Python and JS contribs; because splitmix64 is fixed-width integer arithmetic, each port is ~40 lines and **deletes its Mersenne Twister** (`contrib/python/cuuid/mertwis.py` goes away in the v2 path). Reuse `prototype/cross_validate.sh` to prove byte-for-byte agreement.
-7. **Tests.** Round-trip both codecs; keep a frozen v1 fixture set so we can prove v1 decoding never drifts; add the v2 cross-language vectors.
+1. **`cuuid` stays byte-for-byte frozen.** `uuid.{hh,cc}` and the two contrib ports are untouched, Mersenne Twister and all. It only ever reads and writes what it always did. It becomes read-only legacy: no new `cuuid` databases are created once `wisp` ships.
+2. **`wisp` is a new repo** (`Kronuz/wisp`), built from `prototype/cuuid_v2.hh` and specified in `WISP_SPEC.md`: UUIDv6 canonical, splitmix64 reconstruction, millisecond-since-2026 timestamp, a minimal ~7-byte sortable wire, an order-preserving text encoding, and its own detection sentinel. The generator mints `wisp` by default.
+3. **No in-band sniffing in either.** `serialise` / `unserialise` act on a known format supplied by context (the database's format), never guessed from bytes.
+4. **Port `wisp` to all three languages.** The wire is a C++/Python/JavaScript contract. Because splitmix64 is fixed-width integer arithmetic, each port is ~40 lines and carries **no Mersenne Twister** (the reason `cuuid`'s Python port had to ship `mertwis.py`; `wisp` never does). Reuse `prototype/cross_validate.sh` to prove byte-for-byte agreement.
+5. **Tests.** Keep a frozen `cuuid` fixture set so its decoding provably never drifts; add the `wisp` cross-language vectors.
 
 ## Xapiand
 
-1. **Record a cuuid format version in the database/schema metadata**, alongside the existing backend version. A database created by the new Xapiand is stamped `cuuid: v2`; an existing one reads as `v1`.
-2. **Dispatch the ID codec on that version.** When Xapiand serialises or parses the `Q`-prefixed document-id term, it uses the codec for that database's version. Because each database is version-pure, this is a single lookup, not a per-id decision.
-3. **Text I/O** (query strings, JSON document ids) uses the sentinel from the library: `~...` is v1, the v2 sentinel is v2. A user-supplied id is decoded by its prefix; an id we emit uses the database's version.
-4. **Writable path stays on glass.** Nothing here needs honey. (Honey remains a separate, optional compaction tier; it is read-only and orthogonal to this.)
-5. **Replication and WAL carry the version** the same way they carry the backend version, so a replica reconstructs the same codec.
+1. **Auto-detect the format from database metadata.** A database records which id format it uses (alongside the backend version). An existing database reads as `cuuid` and keeps using it; a newly created one is stamped `wisp`.
+2. **`--legacy-cuuid` is the explicit override**, for an operator who wants new databases to keep using `cuuid` during the transition. The default for new databases is `wisp`; detection, not the flag, protects existing data, so forgetting the flag can never turn a `cuuid` database into a `wisp` one.
+3. **Dispatch the ID codec on the database's format.** When Xapiand serialises or parses the `Q`-prefixed document-id term, it uses that database's codec. Because each database is format-pure, this is a single lookup, not a per-id decision.
+4. **Text I/O keeps the O(1) fast-path.** Xapiand recognizes an id string in one character compare today (`serialise.cc:90`, `uuid.front() == '~'`) and short-circuits non-typed strings with the guarded-character pre-check (`serialise.cc:959`). `wisp` adds its own sentinel to that guarded set and its own `front() == <S>` check, so `~...` means `cuuid`, the `wisp` sentinel means `wisp`, and a plain string still skips both. A user-supplied id is decoded by its sentinel; an id we emit uses the database's format.
+5. **Writable path stays on glass.** Nothing here needs honey. (Honey remains a separate, optional compaction tier; it is read-only and orthogonal to this.)
+6. **Replication and WAL carry the format** the same way they carry the backend version, so a replica reconstructs the same codec.
 
 ## Migration and deprecation
 
-- **Phase 0 (ship, no behavior change).** Land the v2 codec in cuuid and Xapiand, defaulting **new databases** to v2. Existing databases keep writing v1. Every reader can now read both. This is the only step that must happen before any v2 id exists anywhere.
-- **Phase 1 (v2 is the default).** All newly created databases are v2. Old databases are still v1 and fully readable and writable by the v1 codec.
-- **Phase 2 (drain v1).** Migrate old databases by **re-indexing** their documents into fresh v2 databases (a normal reindex; ids are regenerated as v2, or the document keeps its logical id and only the storage representation changes). Alternatively, let short-lived indices age out on their own. Track how many live databases are still v1.
-- **Phase 3 (drop v1).** Once no live database reports `cuuid: v1`, delete the v1 codec from the library and the contribs, taking the Mersenne Twister with it. The frozen v1 fixtures stay in the test suite one release longer as a tripwire, then go too.
+- **Phase 0 (ship, no behavior change).** Land `wisp` and wire it into Xapiand, defaulting **new databases** to `wisp` (detection keeps existing databases on `cuuid`). Every reader can now read both. This is the only step that must happen before any `wisp` id exists anywhere.
+- **Phase 1 (`wisp` is the default).** All newly created databases are `wisp`. Old databases are still `cuuid` and fully readable and writable by the frozen `cuuid` codec.
+- **Phase 2 (drain `cuuid`).** Migrate old databases by **re-indexing** their documents into fresh `wisp` databases (a normal reindex; ids are regenerated, or the document keeps its logical id and only the storage representation changes). Alternatively, let short-lived indices age out on their own. Track how many live databases are still `cuuid`.
+- **Phase 3 (drop `cuuid`).** Once no live database reports the `cuuid` format, remove the `cuuid` dependency, taking the Mersenne Twister with it. The frozen `cuuid` fixtures stay in the test suite one release longer as a tripwire, then go too.
 
 Because ids are only ever *rewritten* (during reindex), never reinterpreted in place, there is no window where an id decodes to two different values. That is the property the whole plan is built to preserve.
 
 ## Decisions to make
 
-1. **v2 text sentinel.** Which character marks a v2 text id (so `~` stays v1)? Needs to be one Xapiand's query and JSON layers treat as an id prefix and that is not otherwise meaningful.
-2. **Length encoding.** Fold the length into the payload's top bits like v1's VL table (8-byte steady wire, = v1) or keep the prototype's explicit length byte (simpler, one byte larger)? This is a forever-byte, so probably worth folding.
-3. **Nil special-case.** Port v1's clean all-zero node (`0x010000000000`) into v2's `reconstruct_node`, so a v2 nil is a recognizable value rather than a splitmix node? Cosmetic, cheap.
-4. **Migration strategy per index.** Active reindex, lazy read-old-write-new, or age-out only? Likely a mix keyed on index size and churn.
-5. **Same-database coexistence.** Confirm we never need v1 and v2 in one database (the plan assumes not). If some shared/global index must accept both, that reopens the in-band dispatch problem and needs its own answer.
+1. **The `wisp` sentinel.** Which character marks a `wisp` text id (so `~` stays `cuuid`)? It must join Xapiand's guarded pre-check set and be rare in real text. Tracked in `WISP_SPEC.md`.
+2. **`wisp` text encoding + minimal wire details** (order-preserving base32 vs base64, the folded length): owned by `WISP_SPEC.md`.
+3. **Migration strategy per index.** Active reindex, lazy read-old-write-new, or age-out only? Likely a mix keyed on index size and churn.
+4. **Same-database coexistence.** Confirm we never need `cuuid` and `wisp` in one database (the plan assumes not). If some shared/global index must accept both, that reopens the in-band dispatch problem and needs its own answer.
