@@ -10,7 +10,7 @@
 // UUIDv7 (RFC 9562) and a Twitter-style Snowflake are implemented inline so the
 // benchmark is self-contained; cuuid is the real library.
 
-#include "uuid.hh"
+#include "cuuid_v1.hh"
 
 #include <algorithm>
 #include <array>

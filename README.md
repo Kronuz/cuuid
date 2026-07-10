@@ -3,7 +3,7 @@
 Condensed UUID value type extracted from [Xapiand](https://github.com/Kronuz/Xapiand). It can generate, parse, format, serialise, and unserialise UUIDs, with Xapiand's compact binary wire encoding preserved byte-for-byte.
 
 ```cpp
-#include "uuid.hh"
+#include "cuuid_v1.hh"
 
 UUIDGenerator generator;
 UUID uuid = generator();

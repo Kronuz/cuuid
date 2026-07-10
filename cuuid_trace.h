@@ -1,7 +1,7 @@
 /*
  * Default (no-op) logging hooks for the standalone `cuuid` library.
  *
- * uuid.cc instruments the condensed UUID codec through the L_* trace family. The
+ * cuuid_v1.cc instruments the condensed UUID codec through the L_* trace family. The
  * standalone library keeps those hooks no-op by default, so it has no dependency
  * on Xapiand's logger or on repr(). Arguments are dropped unevaluated by the
  * variadic no-op macro.

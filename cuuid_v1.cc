@@ -21,7 +21,7 @@
  * THE SOFTWARE.
  */
 
-#include "uuid.hh"
+#include "cuuid_v1.hh"
 
 #include <algorithm>                              // for std::copy_n
 #include <cassert>                                // for assert

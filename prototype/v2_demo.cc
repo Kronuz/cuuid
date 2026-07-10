@@ -7,7 +7,7 @@
 //
 // Links the real cuuid (uuid.hh) for the head-to-head; the prototype is header-only.
 
-#include "uuid.hh"
+#include "cuuid_v1.hh"
 #include "../prototype/cuuid_v2.hh"
 
 #include <algorithm>
