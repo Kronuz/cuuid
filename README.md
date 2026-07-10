@@ -37,6 +37,17 @@ cmake --build build
 ctest --test-dir build
 ```
 
+## How it compares (Snowflake, UUIDv7, and the rest)
+
+cuuid is a version-1 UUID plus a condensed, variable-length wire codec. That codec makes it byte-sortable and, for present-day timestamps, **8 bytes on the wire** (half of UUIDv7, equal to a 64-bit Snowflake, with no worker-id coordination). The trade is CPU: the compact path runs a Mersenne-Twister node reconstruction on both encode and decode.
+
+See **[COMPARISON.md](COMPARISON.md)** for the full analysis against Snowflake, UUIDv7, UUIDv6, and ULID: benchmark data, the time-dependent size and ~1.64 ms sort floor, where it shines and where it breaks down, and two concrete ways to make it faster and natively sortable. Run the harness yourself:
+
+```sh
+cmake --build build --target cuuid_compare
+./build/cuuid_compare
+```
+
 ## Use with FetchContent
 
 ```cmake

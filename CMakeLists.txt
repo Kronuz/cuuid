@@ -81,4 +81,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 
 	add_executable(cuuid_benchmark benchmarks/serialise_parse.cc)
 	target_link_libraries(cuuid_benchmark PRIVATE cuuid)
+
+	add_executable(cuuid_compare benchmarks/compare.cc)
+	target_link_libraries(cuuid_compare PRIVATE cuuid)
 endif()
