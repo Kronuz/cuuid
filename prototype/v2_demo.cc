@@ -124,6 +124,35 @@ int main(int argc, char** argv) {
 		return 0;
 	}
 
+	// --v1-vectors: emit the REAL v1 (current library) forms for a fixed set of inputs, so the
+	// Python side (compare_v1.py) can print v1 and v2 side by side with base59 "~" strings.
+	// line: time<TAB>clock<TAB>node<TAB>v1_canonical<TAB>v1_wire_hex
+	if (argc > 1 && std::string(argv[1]) == "--v1-vectors") {
+		auto hex = [](const std::string& s) {
+			static const char* H = "0123456789abcdef";
+			std::string o;
+			for (unsigned char c : s) { o.push_back(H[c >> 4]); o.push_back(H[c & 0xf]); }
+			return o;
+		};
+		uint64_t yr_ms = 31556952000ULL;
+		uint64_t base_ms = cuuid_v2::EPOCH_2026_MS + 190ULL * 86400 * 1000;
+		struct { const char* lbl; uint64_t off_ms; uint16_t clock; uint64_t node; } cases[] = {
+			{"A", 0, 0x1abc, 0x0123456789abULL},
+			{"B", 1, 0x1abc, 0x0123456789abULL},
+			{"C", 9 * yr_ms, 0x0042, 0xfedcba987654ULL},
+		};
+		for (auto& c : cases) {
+			uint64_t greg = cuuid_v2::GREG_EPOCH_100NS + (base_ms + c.off_ms) * 10000ULL;
+			UUID u = make_v1(greg, c.clock, c.node);
+			u.compact_crush();
+			std::printf("%llu\t%u\t%llu\t%s\t%s\n",
+			            static_cast<unsigned long long>(greg), c.clock,
+			            static_cast<unsigned long long>(c.node),
+			            u.to_string().c_str(), hex(u.serialise()).c_str());
+		}
+		return 0;
+	}
+
 	std::printf("== cuuid v2 prototype ==\n\n");
 
 	// ---------- 1. Round-trip correctness ----------

@@ -133,8 +133,45 @@ def tag_space_report() -> None:
     print("     band. (0x02 is v1-valid, i.e. also unsafe. See strings_demo.py.)\n")
 
 
+def node_entropy_report() -> None:
+    print("== How uniqueness is guaranteed, and where compaction trades it away ==")
+    print(
+        "An id is unique by (timestamp, clock_seq, node). Three independent lines of defense:"
+    )
+    print(
+        "  1. WITHIN a node: clock_seq is a 14-bit counter -> up to 16384 distinct ids per time"
+    )
+    print(
+        "     bucket, and the timestamp advances between buckets. Hard guarantee below that rate."
+    )
+    print("  2. ACROSS nodes, EXPANDED: keeps the full 48-bit node.")
+    print(
+        f"       collision needs a 48-bit node birthday (~{int(math.sqrt(2 * 2**48 * math.log(2))):,} nodes for 50%)."
+    )
+    print("  3. ACROSS nodes, COMPACT: node is reduced to a 7-bit salt (128 values).")
+    space = 2**7 * 2**14
+    print(
+        f"       distinct compact ids in ONE ms across all nodes = 2^7 salt * 2^14 clock = {space:,}."
+    )
+    for k in (100, 1000, 5000):
+        p = 1 - math.exp(-(k * k) / (2 * space))
+        print(
+            f"       {k:>5} compact ids/ms fleet-wide -> {p:.1%} chance of a collision"
+        )
+    print(
+        "  => Use EXPANDED for strong cross-node uniqueness; COMPACT is a size-for-uniqueness"
+    )
+    print(
+        "     trade, safe for a single writer or a bounded fleet/rate. v1 and v2 make the SAME"
+    )
+    print(
+        "     trade; v2's 1ms buckets are marginally safer than v1's 1.6384ms (see above).\n"
+    )
+
+
 if __name__ == "__main__":
     collision_report()
+    node_entropy_report()
     compression_report()
     print()
     tag_space_report()

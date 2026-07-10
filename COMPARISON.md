@@ -202,11 +202,31 @@ cross-language: C++ == Python == JavaScript [OK]
 
 So a v2 is three coordinated changes, not one, but it is a **simplifying** three: every port deletes its Mersenne Twister (the whole of `mertwis.py`) and replaces it with a four-line splitmix64, and the cross-system determinism stops being something you pray for and becomes something the arithmetic guarantees. That trade, three small coordinated ports against a permanently cheaper, natively-sortable, and easier-to-port format, is the actual decision, and it is a good one whenever the format is next revised.
 
-### Collisions and the millisecond question
+### v1 and v2, the same input in both forms
 
-Storing the timestamp as milliseconds sounds coarser than v1's 100ns, so the fair worry is collisions. But the comparison is not against a full 100ns UUID, it is against the **compact form we actually used**, and that was never 100ns: v1's compact path folds the low 14 bits of the 100ns timestamp away, which quantizes it to `2^14 * 100ns = 1.6384 ms`. Against that real baseline, v2's 1ms is **finer**, not coarser.
+Running the same `(time, clock, node)` through the real v1 library and through v2 (`./build/cuuid_v2_demo --v1-vectors | python3 prototype/compare_v1.py`) makes the differences concrete:
 
-A compacted id on one node is unique per `(time bucket, clock_seq)` (the salt is `node & 0x7f`, fixed per node). So what matters is how many ids fall in one time bucket, and smaller buckets hold fewer. Before the 14-bit clock sequence is exhausted:
+```text
+input  greg=140029344000000000 clock=6844 node=0x0123456789ab
+  v1  canonical 4b400800-7bf2-11f1-a2bc-85d50201962b
+      wire      4bcbb8833c22bc57   (8 bytes)   ~DpjALhPwn2j2
+  v2  canonical 1f17bf24-b404-6000-9abc-0ff76d02512b   (UUIDv6)
+      wire      07f49e12001abc57   (8 bytes)   ~GEDryoPFbV6N
+```
+
+Same size on the wire (8 bytes), same `~` base59 shape. The differences are the ones that matter: the v1 canonical is a **version-1** UUID (note the `11f1`, and the timestamp is split and shuffled across the string, so the raw bytes do not sort by time), while the v2 canonical is a **version-6** UUID (`6000`, timestamp first, so the bytes sort). And the v2 wire decodes without a Mersenne Twister and shrinks toward 4 bytes near its 2026 epoch. Feed two ids a millisecond apart and the v2 forms share a long prefix (`1f17bf24-b40...`, `07f49e120...`) while the v1 forms diverge earlier, which is the sortability and prefix-compression difference showing up in the actual bytes.
+
+### Ensuring uniqueness: how collisions are prevented
+
+An id is unique by `(timestamp, clock_seq, node)`, and there are three independent lines of defense. The base guarantee comes from the generator (`uuid_generate_time`): a globally-unique node, a monotonic timestamp, and a `clock_seq` that is a counter, incremented within a single tick and bumped if the clock ever runs backwards.
+
+1. **Within one node.** `clock_seq` is a 14-bit counter, so a node can mint up to **16,384 distinct ids per time bucket** before it wraps, and the timestamp advances between buckets. Below that rate it is a hard guarantee, not a probability.
+2. **Across nodes, expanded form.** The full **48-bit node** is on the wire, so two machines collide only via a 48-bit birthday (about 19.7 million nodes for a 50% chance, independent of rate). This is the RFC-strength guarantee.
+3. **Across nodes, compact form.** This is where compaction spends uniqueness for size: the node is reduced to a **7-bit salt** (128 values). Fleet-wide, the distinct compact ids in one millisecond are `2^7 salt * 2^14 clock = ~2.1 million`, so the cross-node birthday is real at high aggregate rates: ~0.2% for 100 compact ids/ms fleet-wide, ~21% at 1,000/ms, ~99.7% at 5,000/ms.
+
+So "how do we ensure no collision" has a precise answer: **use the expanded form when you need strong cross-node uniqueness** (it keeps the whole node), and treat the **compact form as a size-for-uniqueness trade** that is safe for a single writer or a bounded fleet and rate. This contract is identical in v1 and v2; v2 changes none of the node handling.
+
+On the *time* dimension specifically, milliseconds sound coarser than v1's 100ns, but the comparison is against the compact form actually used, and that was never 100ns: v1 folds the low 14 bits of its 100ns timestamp away, quantizing to `2^14 * 100ns = 1.6384 ms`. So v2's 1ms bucket is **finer**, and holds fewer ids:
 
 | | time bucket | max ids/sec/node |
 |---|---|---|
@@ -214,7 +234,7 @@ A compacted id on one node is unique per `(time bucket, clock_seq)` (the salt is
 | v1 compact (1.6384 ms fold) | 1.6384 ms | ~10 million |
 | **v2 compact (1 ms)** | 1.0 ms | **~16.4 million** |
 
-And if the clock sequence were random rather than a counter (the worst case), the birthday collision risk per node at 100k ids/sec is **~26% for v2 vs ~56% for v1 compact**. Either way v2 is the safer of the two compact forms. Cross-node uniqueness is unchanged: expanded ids still carry the full 48-bit node, and compact ids reduce it to the same 7-bit salt in both v1 and v2. So the move to milliseconds does not cost collision resistance against the form it replaces; it slightly improves it.
+If the clock sequence were random rather than a counter (worst case), the per-node birthday risk at 100k ids/sec is ~26% for v2 versus ~56% for v1 compact. Either way v2 is the safer of the two compact forms. (Reproduce the numbers with `python3 prototype/analysis.py`.)
 
 ### The compression idea, and the bigger win
 
@@ -255,6 +275,8 @@ cmake --build build --target cuuid_compare cuuid_v2_demo
 ./build/cuuid_compare    # the comparison across schemes
 ./build/cuuid_v2_demo    # the working v2 prototype
 ./prototype/cross_validate.sh   # C++ == Python == JavaScript, byte-for-byte
+./build/cuuid_v2_demo --v1-vectors | python3 prototype/compare_v1.py   # v1 vs v2, side by side
+python3 prototype/analysis.py   # collisions, uniqueness, compression, tag space
 ```
 
 UUIDv6, UUIDv7, ULID, and Snowflake are implemented inline in `benchmarks/compare.cc` so the harness is self-contained; cuuid is the real library. The v2 prototype lives in `prototype/` (C++ codec, Python and JavaScript ports, and the cross-language check) and does not touch the frozen codec. Absolute ns/op will vary by machine; the ratios are the point.
