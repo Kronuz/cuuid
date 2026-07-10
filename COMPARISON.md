@@ -136,7 +136,7 @@ I built that v2 as a standalone prototype (`prototype/cuuid_v2.hh` and `prototyp
 |---|---|---|
 | encode | ~12 ns | ~880 ns |
 | decode | ~8 ns | ~850 ns |
-| compact wire | 4 bytes (2026) to 8 bytes (steady) | 8 bytes |
+| compact wire | 5 bytes (2026) to 9 bytes steady (8 with a VL-folded length, = v1) | 8 bytes |
 | condensed wire sortable | yes (1.0000) | yes (1.0000) |
 | **canonical bytes sortable** | **yes (1.0000, v6)** | **no (v1)** |
 
@@ -182,10 +182,27 @@ The first byte `0x07` is the length; it is nonzero, so `~GEDryoPFbV6N` round-tri
 
 The compact wire spends most of its bytes on the timestamp, so that is where size is won or lost. Two changes, both essentially free:
 
-- **Rebase the epoch to 2026.** The delta from the epoch is what gets stored, so a 2026 epoch makes present-day ids tiny: a compact id minted in 2026 has a **4-byte** payload, versus v1's 8. The delta grows over time (about 35 bits per year in ms), so the payload climbs back to 8 bytes within a year or two, but the near-term win is real and the epoch can be re-based again at the next format revision.
-- **Store milliseconds, not 100ns ticks.** v1 carries a 60-bit Gregorian 100ns timestamp and then folds away its low 14 bits with an XOR, which is really a clumsy way of quantizing to ~1.64ms. Storing plain milliseconds gets the same resolution (1ms) without the fold, which is why the v2 codec has no XOR and no clock-scrambling: cleaner to read, cleaner to port, and it gives a proper 1ms sort granularity with the clock as a tie-breaker instead of v1's scrambled 1.64ms floor. Honestly, v1's fold already approximated milliseconds, so the steady-state payload is the same 8 bytes; the ms form's gain is that it stays flat at 8 out to 2100 (v1 creeps to 9) and, mostly, that it is far simpler.
+- **Rebase the epoch to 2026.** The delta from the epoch is what gets stored, so a 2026 epoch makes present-day ids tiny: a compact id minted in 2026 has a **4-byte payload** (a 5-byte wire with the length byte), versus v1's 8. The delta grows over time (about 35 bits per year in ms), so the payload climbs back up within the first day, but the near-term win is real and the epoch can be re-based again at the next format revision.
+- **Store milliseconds, not 100ns ticks.** v1 carries a 60-bit Gregorian 100ns timestamp and then folds away its low 14 bits with an XOR, which is really a clumsy way of quantizing to ~1.64ms. Storing plain milliseconds gets the same resolution (1ms) without the fold, which is why the v2 codec has no XOR and no clock-scrambling: cleaner to read, cleaner to port, and it gives a proper 1ms sort granularity with the clock as a tie-breaker instead of v1's scrambled 1.64ms floor. Honestly, v1's fold already approximated milliseconds, so the steady-state payload is the same 8 bytes; the ms form's gain is that it stays flat out to ~2165 (v1's payload creeps to 9 sooner) and, mostly, that it is far simpler. See the size schedule below for the exact steps.
 
 The canonical form stays a full RFC-valid UUIDv6 (the sub-millisecond digits are just zero), so it still sorts at millisecond resolution.
+
+### The size schedule (when the wire grows a byte)
+
+Because the wire is variable-length, its size is a step function of the timestamp. The steps are front-loaded (ms resolution gains a bit every doubling of elapsed time) and then very sparse. The total wire (a length byte plus payload) first reaches each size at:
+
+| total bytes | first reached |
+|---|---|
+| 5 | 2026-01-01, +4 ms |
+| 6 | 2026-01-01, +1 s |
+| 7 | 2026-01-01, +4.4 min |
+| 8 | 2026-01-01, +18.6 h |
+| **9** | **2026-07-18** |
+| 10 | ~2165 |
+| 11 | ~year 37,700 |
+| 12 | ~year 9.4 million |
+
+So it climbs from 5 to 8 bytes within the first day of 2026, hits **9 bytes on 2026-07-18**, and then holds 9 bytes for about 139 years (to ~2165), with every later jump roughly 256x rarer than the one before. Two honest notes this makes precise: the "4 bytes near the epoch" figure is a **payload** of 4 (total 5, counting the length byte); and the prototype's steady state is **9 total bytes**, one more than v1's 8. That extra byte is the explicit length byte, which v1 avoids by folding the length into the payload's top bits (its VL table). Reclaim it the same way and v2 matches v1 at 8 bytes exactly, with all of v2's other wins intact. (Reproduce with `python3 prototype/analysis.py`.)
 
 ### The ports, and why they get simpler
 
@@ -214,7 +231,7 @@ input  greg=140029344000000000 clock=6844 node=0x0123456789ab
       wire      07f49e12001abc57   (8 bytes)   ~GEDryoPFbV6N
 ```
 
-Same size on the wire (8 bytes), same `~` base59 shape. The differences are the ones that matter: the v1 canonical is a **version-1** UUID (note the `11f1`, and the timestamp is split and shuffled across the string, so the raw bytes do not sort by time), while the v2 canonical is a **version-6** UUID (`6000`, timestamp first, so the bytes sort). And the v2 wire decodes without a Mersenne Twister and shrinks toward 4 bytes near its 2026 epoch. Feed two ids a millisecond apart and the v2 forms share a long prefix (`1f17bf24-b40...`, `07f49e120...`) while the v1 forms diverge earlier, which is the sortability and prefix-compression difference showing up in the actual bytes.
+Same size on the wire (8 bytes at this mid-2026 date), same `~` base59 shape. The differences are the ones that matter: the v1 canonical is a **version-1** UUID (note the `11f1`, and the timestamp is split and shuffled across the string, so the raw bytes do not sort by time), while the v2 canonical is a **version-6** UUID (`6000`, timestamp first, so the bytes sort). And the v2 wire decodes without a Mersenne Twister and shrinks toward a 4-byte payload near its 2026 epoch. Feed two ids a millisecond apart and the v2 forms share a long prefix (`1f17bf24-b40...`, `07f49e120...`) while the v1 forms diverge earlier, which is the sortability and prefix-compression difference showing up in the actual bytes.
 
 ### Ensuring uniqueness: how collisions are prevented
 

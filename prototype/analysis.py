@@ -169,9 +169,49 @@ def node_entropy_report() -> None:
     )
 
 
+def size_schedule_report() -> None:
+    print("== When does the v2 compact wire jump to N bytes? (ms/2026 epoch) ==")
+
+    def total_size(v2ms: int) -> int:
+        value = (v2ms << 22) | 1  # clock=salt=0, flag=1: minimum value for this v2ms
+        return 1 + (value.bit_length() + 7) // 8  # 1 length byte + payload
+
+    def first_v2ms(target: int) -> int:
+        lo, hi = 0, 1 << 62
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if total_size(mid) >= target:
+                hi = mid
+            else:
+                lo = mid + 1
+        return lo
+
+    yr_ms = 31556952000
+    for n in range(4, 13):
+        ms = first_v2ms(n)
+        years = ms / yr_ms
+        cal = 2026 + years
+        when = (
+            f"year {cal:,.0f}"
+            if cal > 9999
+            else f"2026-01-01 + {ms / 1000:,.0f}s ({years:.2f}y) ~ {int(cal)}"
+        )
+        print(f"  {n:>2} bytes first at {when}")
+    print(
+        "  So: it climbs 4->8 bytes within the first DAY of 2026, hits 9 bytes on 2026-07-18,"
+    )
+    print(
+        "  then stays 9 until ~2165, 10 until ~year 37,700, each jump ~256x rarer than the last."
+    )
+    print(
+        "  (The +1 length byte over v1's 8-byte steady state is v1's VL fold, reclaimable.)\n"
+    )
+
+
 if __name__ == "__main__":
     collision_report()
     node_entropy_report()
     compression_report()
     print()
     tag_space_report()
+    size_schedule_report()
