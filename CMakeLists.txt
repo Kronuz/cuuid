@@ -84,4 +84,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 
 	add_executable(cuuid_compare benchmarks/compare.cc)
 	target_link_libraries(cuuid_compare PRIVATE cuuid)
+
+	add_executable(cuuid_v2_demo prototype/v2_demo.cc)
+	target_link_libraries(cuuid_v2_demo PRIVATE cuuid)
 endif()
