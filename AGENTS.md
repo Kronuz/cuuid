@@ -13,11 +13,15 @@ cuuid_common.h                  Shared condenser (UUIDCondenser + VL wire) and p
 cuuid_common.cc                 UUIDCondenser serialise/unserialise + parameterized calculate_node.
 cuuid_v1.hh                     v1 UUID and UUIDGenerator public API (frozen).
 cuuid_v1.cc                     v1 codec/generator; reuses cuuid_common (mt19937 node expander).
+cuuid_v6.hh                     v6 codec API (make/generate/serialise/unserialise) on the shared UUID.
+cuuid_v6.cc                     v6: splitmix64 expander + RFC-9562 UUIDv6 layout; reuses cuuid_common.
+cuuid.hh                        Umbrella: version-nibble encode dispatch + running-codec decode.
 cuuid_trace.h                   No-op L_* logging defaults, override with CUUID_TRACE_HEADER.
 cuuid_exception.h               std-based THROW defaults, override with CUUID_EXCEPTION_HEADER.
 cuuid_node.h                    local_node_hash() default, override with CUUID_NODE_HEADER.
 examples/demo.cc                Generate, serialise, unserialise, and print a UUID.
 test/test.cc                    ctest coverage for string/wire round-trips and v1 fields.
+test/test_v6.cc                 ctest coverage for v6 round-trips, UUIDv6 layout, sort, dispatch.
 benchmarks/serialise_parse.cc   Small serialise/parse throughput harness.
 ```
 
