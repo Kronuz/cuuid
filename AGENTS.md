@@ -9,8 +9,10 @@ Condensed UUID parsing, formatting, generation, and binary serialisation extract
 ## File map
 
 ```text
+cuuid_common.h                  Shared condenser (UUIDCondenser + VL wire) and primitives (v1/v6).
+cuuid_common.cc                 UUIDCondenser serialise/unserialise + parameterized calculate_node.
 cuuid_v1.hh                     v1 UUID and UUIDGenerator public API (frozen).
-cuuid_v1.cc                     Verbatim v1 codec/generator implementation with seams (frozen).
+cuuid_v1.cc                     v1 codec/generator; reuses cuuid_common (mt19937 node expander).
 cuuid_trace.h                   No-op L_* logging defaults, override with CUUID_TRACE_HEADER.
 cuuid_exception.h               std-based THROW defaults, override with CUUID_EXCEPTION_HEADER.
 cuuid_node.h                    local_node_hash() default, override with CUUID_NODE_HEADER.

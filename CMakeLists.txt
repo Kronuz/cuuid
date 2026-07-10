@@ -15,7 +15,7 @@ FetchContent_Declare(char_classify GIT_REPOSITORY https://github.com/Kronuz/char
 FetchContent_MakeAvailable(endian char_classify)
 
 # --- Library target ---
-add_library(cuuid STATIC cuuid_v1.cc)
+add_library(cuuid STATIC cuuid_common.cc cuuid_v1.cc)
 target_include_directories(cuuid PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_features(cuuid PUBLIC cxx_std_20)
 target_link_libraries(cuuid PUBLIC endian::endian char_classify::char_classify)

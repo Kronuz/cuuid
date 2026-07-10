@@ -23,6 +23,8 @@
 
 #include "cuuid_v1.hh"
 
+#include "cuuid_common.h"                         // for UUIDCondenser, calculate_node, constants, fnv_1a, xor_fold
+
 #include <algorithm>                              // for std::copy_n
 #include <cassert>                                // for assert
 #include <cstring>                                // for memcmp
@@ -57,265 +59,14 @@
 #endif
 
 
-// 0x01b21dd213814000 is the number of 100-ns intervals between the
-// UUID epoch 1582-10-15 00:00:00 and the Unix epoch 1970-01-01 00:00:00.
-// 0x00011f0241243c00 = 1yr (365.2425 x 24 x 60 x 60 = 31556952s = 31556952000000000 nanoseconds)
-constexpr uint64_t UUID_TIME_EPOCH             = 0x01b21dd213814000ULL;
-constexpr uint64_t UUID_TIME_YEAR              = 0x00011f0241243c00ULL;
-constexpr uint64_t UUID_TIME_INITIAL           = UUID_TIME_EPOCH + (2016 - 1970) * UUID_TIME_YEAR;
-constexpr uint8_t  UUID_MAX_SERIALISED_LENGTH  = 17;
-
-constexpr uint8_t TIME_BITS       = 60;
-constexpr uint8_t PADDING_C0_BITS = 64 - TIME_BITS;
-constexpr uint8_t PADDING_E0_BITS = 64 - TIME_BITS;
-constexpr uint8_t COMPACTED_BITS  = 1;
-constexpr uint8_t SALT_BITS       = 7;
-constexpr uint8_t CLOCK_BITS      = 14;
-constexpr uint8_t NODE_BITS       = 48;
-constexpr uint8_t PADDING_C1_BITS = 64 - COMPACTED_BITS - SALT_BITS - CLOCK_BITS;
-constexpr uint8_t PADDING_E1_BITS = 64 - COMPACTED_BITS - NODE_BITS - CLOCK_BITS;
-
-constexpr uint64_t TIME_MASK     =  ((1ULL << TIME_BITS)    - 1);
-constexpr uint64_t SALT_MASK     =  ((1ULL << SALT_BITS)    - 1);
-constexpr uint64_t CLOCK_MASK    =  ((1ULL << CLOCK_BITS)   - 1);
-constexpr uint64_t NODE_MASK     =  ((1ULL << NODE_BITS)    - 1);
-
-// Variable-length length encoding table for condensed UUIDs (prefix, mask)
-static constexpr uint8_t VL[13][2][2] = {
-	{ { 0x1c, 0xfc }, { 0x1c, 0xfc } },  // 4:  00011100 11111100  00011100 11111100
-	{ { 0x18, 0xfc }, { 0x18, 0xfc } },  // 5:  00011000 11111100  00011000 11111100
-	{ { 0x14, 0xfc }, { 0x14, 0xfc } },  // 6:  00010100 11111100  00010100 11111100
-	{ { 0x10, 0xfc }, { 0x10, 0xfc } },  // 7:  00010000 11111100  00010000 11111100
-	{ { 0x04, 0xfc }, { 0x40, 0xc0 } },  // 8:  00000100 11111100  01000000 11000000
-	{ { 0x0a, 0xfe }, { 0xa0, 0xe0 } },  // 9:  00001010 11111110  10100000 11100000
-	{ { 0x08, 0xfe }, { 0x80, 0xe0 } },  // 10: 00001000 11111110  10000000 11100000
-	{ { 0x02, 0xff }, { 0x20, 0xf0 } },  // 11: 00000010 11111111  00100000 11110000
-	{ { 0x03, 0xff }, { 0x30, 0xf0 } },  // 12: 00000011 11111111  00110000 11110000
-	{ { 0x0c, 0xff }, { 0xc0, 0xf0 } },  // 13: 00001100 11111111  11000000 11110000
-	{ { 0x0d, 0xff }, { 0xd0, 0xf0 } },  // 14: 00001101 11111111  11010000 11110000
-	{ { 0x0e, 0xff }, { 0xe0, 0xf0 } },  // 15: 00001110 11111111  11100000 11110000
-	{ { 0x0f, 0xff }, { 0xf0, 0xf0 } },  // 16: 00001111 11111111  11110000 11110000
-};
-
-
-template <typename T>
-static inline void
-pack(char** p, T num)
-{
-	auto end = *p + sizeof(num);
-	auto ptr = end;
-	for (size_t i = 0; i < sizeof(num); ++i) {
-		*--ptr = static_cast<char>(num & 0xff);
-		num >>= 8;
-	}
-	*p = end;
-}
-
-
-template <typename T>
-static inline T
-unpack(char** const p)
-{
-	T num = 0;
-	auto ptr = *p;
-	for (size_t i = 0; i < sizeof(num); ++i) {
-		num <<= 8;
-		num |= static_cast<unsigned char>(*ptr++);
-	}
-	*p = ptr;
-	return num;
-}
-
-
-static inline uint64_t fnv_1a(uint64_t num) {
-	// calculate FNV-1a hash
-	uint64_t fnv = 0xcbf29ce484222325ULL;
-	while (num != 0u) {
-		fnv ^= num & 0xff;
-		fnv *= 0x100000001b3ULL;
-		num >>= 8;
-	}
-	return fnv;
-}
-
-
-static inline uint64_t xor_fold(uint64_t num, int bits) {
-	// xor-fold to n bits:
-	uint64_t folded = 0;
-	while (num != 0u) {
-		folded ^= num;
-		num >>= bits;
-	}
-	return folded;
-}
-
-
-/*
- * Union for condensed UUIDs
- */
-union UUIDCondenser {
-	struct value_t {
-		uint64_t val0;
-		uint64_t val1;
-	} value;
-
-	struct compact_t {
-		uint64_t time        : TIME_BITS;
-		uint64_t padding0    : PADDING_C0_BITS;
-
-		uint64_t compacted   : COMPACTED_BITS;
-		uint64_t padding1    : PADDING_C1_BITS;
-		uint64_t salt        : SALT_BITS;
-		uint64_t clock       : CLOCK_BITS;
-	} compact;
-
-	struct expanded_t {
-		uint64_t time        : TIME_BITS;
-		uint64_t padding0    : PADDING_E0_BITS;
-
-		uint64_t compacted   : COMPACTED_BITS;
-		uint64_t padding1    : PADDING_E1_BITS;
-		uint64_t node        : NODE_BITS;
-		uint64_t clock       : CLOCK_BITS;
-	} expanded;
-
-	uint64_t calculate_node() const;
-
-	std::string serialise() const;
-	static UUIDCondenser unserialise(const char** ptr, const char* end);
-
-	UUIDCondenser();
-};
-
-
-UUIDCondenser::UUIDCondenser()
-	: compact({ 0, 0, 0, 0, 0, 0 }) { }
-
-
-inline uint64_t
-UUIDCondenser::calculate_node() const
-{
-	L_CALL("UUIDCondenser::calculate_node()");
-
-	if ((compact.time == 0u) && (compact.clock == 0u) && (compact.salt == 0u)) {
-		return 0x010000000000;
-	}
-
-	uint32_t seed = 0;
-	seed ^= fnv_1a(compact.time);
-	seed ^= fnv_1a(compact.clock);
-	seed ^= fnv_1a(compact.salt);
+// v1's node expander: the original std::mt19937 draw. This is the ONE piece v6 swaps
+// out (for splitmix64); everything else in calculate_node() is shared (cuuid_common).
+static uint64_t expand_mt(uint32_t seed) {
 	std::mt19937 rng(seed);
 	uint64_t node = rng();
 	node <<= 32;
 	node |= rng();
-	node &= NODE_MASK & ~SALT_MASK;
-	node |= compact.salt;
-	node |= 0x010000000000; // set multicast bit
 	return node;
-}
-
-
-inline std::string
-UUIDCondenser::serialise() const
-{
-	L_CALL("UUIDCondenser::serialise()");
-
-	uint64_t buf0, buf1;
-	if (compact.compacted != 0u) {
-	//           .       .       .       .       .       .       .       .           .       .       .       .       .       .       .       .
-	// v0:PPPPTTTTTTTTTTTTTTTTTTtttttttttttttttttttttttttttttttttttttttttt v1:KKKKKKKKKKKKKKSSSSSSSPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPC
-	// b0:                                              TTTTTTTTTTTTTTTTTT b1:ttttttttttttttttttttttttttttttttttttttttttKKKKKKKKKKKKKKSSSSSSSC
-		assert(compact.padding0 == 0);
-		assert(compact.padding1 == 0);
-		buf0 = (value.val0 >> PADDING_C1_BITS);
-		buf1 = (value.val0 << (64 - PADDING_C1_BITS)) | (value.val1 >> PADDING_C1_BITS) | 1;
-	} else {
-	//           .       .       .       .       .       .       .       .           .       .       .       .       .       .       .       .
-	// v0:PPPPTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTt v1:KKKKKKKKKKKKKKNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNPC
-	// b0:     TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT b1:tKKKKKKKKKKKKKKNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNC
-		assert(expanded.padding0 == 0);
-		assert(expanded.padding1 == 0);
-		buf0 = (value.val0 >> PADDING_E1_BITS);
-		buf1 = (value.val0 << (64 - PADDING_E1_BITS)) | (value.val1 >> PADDING_E1_BITS);
-	}
-
-	char buf[UUID_MAX_SERIALISED_LENGTH];
-
-	char* end = buf;
-	*end++ = '\0';
-	pack(&end, buf0);
-	pack(&end, buf1);
-	end -= 4; // serialized must be at least 4 bytes long.
-
-	auto ptr = buf;
-	while (ptr != end && (*++ptr == 0)) {}; // remove all leading zeros
-
-	auto length = end - ptr;
-	if ((*ptr & VL[length][0][1]) != 0) {
-		if ((*ptr & VL[length][1][1]) != 0) {
-			--ptr;
-			++length;
-			*ptr |= VL[length][0][0];
-		} else {
-			*ptr |= VL[length][1][0];
-		}
-	} else {
-		*ptr |= VL[length][0][0];
-	}
-
-	return std::string(ptr, length + 4);
-}
-
-
-inline UUIDCondenser
-UUIDCondenser::unserialise(const char** ptr, const char* end)
-{
-	L_CALL("UUIDCondenser::unserialise({})", repr(*ptr, end));
-
-	auto size = end - *ptr;
-	auto length = size + 1;
-	auto l = **ptr;
-	bool q = (l & 0xf0) != 0;
-	int i = 0;
-	for (; i < 13; ++i) {
-		if (VL[i][q][0] == (l & VL[i][q][1])) {
-			length = i + 4;
-			break;
-		}
-	}
-	if (size < length) {
-		THROW(SerialisationError, "Bad condensed UUID");
-	}
-
-	char buf[UUID_MAX_SERIALISED_LENGTH];
-	auto start = buf + UUID_MAX_SERIALISED_LENGTH - length;
-	std::fill(buf, start, 0);
-	std::copy_n(*ptr, length, start);
-
-	*start &= ~VL[i][q][1];
-
-	char* p = &buf[1];
-	auto buf0 = unpack<uint64_t>(&p);
-	auto buf1 = unpack<uint64_t>(&p);
-
-	UUIDCondenser condenser;
-	if ((buf1 & 1) != 0u) {  // compacted
-	//           .       .       .       .       .       .       .       .           .       .       .       .       .       .       .       .
-	// b0:                                                TTTTTTTTTTTTTTTT b1:ttttttttttttttttttttttttttttttttttttttttttttKKKKKKKKKKKKKKSSSSSC
-	// v0:PPPPTTTTTTTTTTTTTTTTtttttttttttttttttttttttttttttttttttttttttttt v1:KKKKKKKKKKKKKKSSSSSPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPC
-		condenser.value.val0 = (buf0 << PADDING_C1_BITS) | (buf1 >> (64 - PADDING_C1_BITS));
-		condenser.value.val1 = (buf1 << PADDING_C1_BITS) | 1;
-	} else {
-	//           .       .       .       .       .       .       .       .           .       .       .       .       .       .       .       .
-	// b0:     TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT b1:tKKKKKKKKKKKKKKNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNC
-	// v0:PPPPTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTt v1:KKKKKKKKKKKKKKNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNPC
-		condenser.value.val0 = (buf0 << PADDING_E1_BITS) | (buf1 >> (64 - PADDING_E1_BITS));
-		condenser.value.val1 = (buf1 << PADDING_E1_BITS);
-	}
-
-	*ptr += length;
-	return condenser;
 }
 
 
@@ -598,7 +349,7 @@ UUID::compact_crush()
 			condenser.compact.salt = salt & SALT_MASK;
 		}
 
-		uuid1_node(condenser.calculate_node());
+		uuid1_node(calculate_node(condenser, expand_mt));
 
 		uuid1_clock_seq(condenser.compact.clock);
 
@@ -658,7 +409,7 @@ UUID::serialise_condensed() const
 	condenser.compact.time = compacted_time;
 	condenser.compact.salt = node & SALT_MASK;
 
-	auto compacted_node = condenser.calculate_node();
+	auto compacted_node = calculate_node(condenser, expand_mt);
 	if (node != compacted_node) {
 		condenser.expanded.compacted = 0u;
 		if ((node & 0x010000000000) == 0u) {
@@ -818,7 +569,7 @@ UUID::unserialise_condensed(const char** ptr, const char* end)
 
 	UUIDCondenser condenser = UUIDCondenser::unserialise(ptr, end);
 
-	uint64_t node = condenser.compact.compacted != 0u ? condenser.calculate_node() : condenser.expanded.node;
+	uint64_t node = condenser.compact.compacted != 0u ? calculate_node(condenser, expand_mt) : condenser.expanded.node;
 
 	uint64_t time = condenser.compact.time;
 	if (time != 0u) {
