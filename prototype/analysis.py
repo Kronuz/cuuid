@@ -89,6 +89,51 @@ def compression_report() -> None:
     )
 
 
+def tag_space_report() -> None:
+    print("== Safe v2 tag: exhaustive over all 256 first-byte values (not sampled) ==")
+    # v1's length-prefix table (invariant, mirrored from uuid.cc); index 0..12 = lengths 4..16.
+    vl = [
+        [(0x1C, 0xFC), (0x1C, 0xFC)],
+        [(0x18, 0xFC), (0x18, 0xFC)],
+        [(0x14, 0xFC), (0x14, 0xFC)],
+        [(0x10, 0xFC), (0x10, 0xFC)],
+        [(0x04, 0xFC), (0x40, 0xC0)],
+        [(0x0A, 0xFE), (0xA0, 0xE0)],
+        [(0x08, 0xFE), (0x80, 0xE0)],
+        [(0x02, 0xFF), (0x20, 0xF0)],
+        [(0x03, 0xFF), (0x30, 0xF0)],
+        [(0x0C, 0xFF), (0xC0, 0xF0)],
+        [(0x0D, 0xFF), (0xD0, 0xF0)],
+        [(0x0E, 0xFF), (0xE0, 0xF0)],
+        [(0x0F, 0xFF), (0xF0, 0xF0)],
+    ]
+
+    def valid_v1(b: int) -> bool:
+        if b == 0x01:  # full form is exactly 0x01
+            return True
+        q = (
+            1 if (b & 0xF0) else 0
+        )  # mirrors unserialise_condensed's first-byte dispatch
+        return any(pref == (b & mask) for pref, mask in (vl[i][q] for i in range(13)))
+
+    invalid = [b for b in range(256) if not valid_v1(b)]
+    print(f"  v1 uses {256 - len(invalid)} of 256 possible first bytes.")
+    print(
+        f"  bytes NO v1 wire can start with: {' '.join(f'0x{b:02x}' for b in invalid) or '(none)'}"
+    )
+    print(
+        f"  => 0x00 is the unique safe v2 tag. (0x02 is valid={valid_v1(0x02)}, i.e. UNSAFE.)"
+    )
+    print(
+        "  Proof, not sample: a full v1 wire is hard-coded 0x01, and a condensed wire strips"
+    )
+    print(
+        "  leading zeros then OR-s a nonzero prefix, so its first byte is always nonzero.\n"
+    )
+
+
 if __name__ == "__main__":
     collision_report()
     compression_report()
+    print()
+    tag_space_report()

@@ -150,9 +150,19 @@ I built that v2 as a standalone prototype (`prototype/cuuid_v2.hh` and `prototyp
 
 The important question for any format change: what happens to the ids already on disk? Xapiand stores them as the `~`-prefixed text form of these exact wire bytes, so a v2 reader will be handed old v1 wires constantly, and it must never silently misread one.
 
-The tag choice is what makes this safe, and it is not free. The obvious pick, `0x02`, is a trap: `0x02` is a real entry in v1's length-prefix table (the length-11 code), so in principle a v1 condensed wire could begin with it, and a dispatcher would then route an old id into the v2 decoder and hand back garbage. The safe pick is **`0x00`**, because it is the one byte no v1 wire can ever start with: the full form is always `0x01`, and the condensed form strips leading zero bytes so its first byte is always nonzero (every prefix is OR-ed into a nonzero byte). So `0x00` cannot collide, by construction, not by luck.
+The tag choice is what makes this safe, and it is not free. The obvious pick, `0x02`, is a trap: `0x02` is a real entry in v1's length-prefix table (the length-11 code), so a v1 condensed wire genuinely can begin with it, and a dispatcher would then route an old id into the v2 decoder and hand back garbage. The safe pick is **`0x00`**, and it is safe by proof, not by sampling.
 
-The prototype proves it against the real library. It generates 720,000 v1 wires (compact and expanded, times spanning decades so every encoded length occurs) and feeds each one to the v2 decoder and to a first-byte dispatcher:
+A one-byte tag lives in a space of only 256 values, so "no v1 wire can start with this byte" is a claim you can settle **exhaustively**, not estimate. Enumerating all 256 against v1's exact decode rules:
+
+```text
+v1 uses 255 of 256 possible first bytes.
+bytes NO v1 wire can start with: 0x00
+=> 0x00 is the unique safe v2 tag. (0x02 is valid, i.e. UNSAFE.)
+```
+
+`0x00` is the *only* byte no v1 wire can begin with, and the reason is structural, not statistical: a full v1 wire is the hard-coded byte `0x01`, and a condensed wire strips its leading zero bytes and then OR-s in a nonzero length prefix, so its first byte is always nonzero. The real library agrees: feeding it 256 buffers that start with `0x00` (varied trailing bytes) rejects all 256. This is also why a random sample, even a large one, cannot *ensure* the property: v1 can emit 255 distinct first bytes, so no finite sample covers the space; the proof does. The 720,000-id probe below is a cross-check, not the argument.
+
+With `0x00` as the tag, the prototype confirms the end-to-end behavior against the real library. It generates 720,000 v1 wires (compact and expanded, times spanning decades so every encoded length occurs) and feeds each to the v2 decoder and to a first-byte dispatcher:
 
 ```text
 V2_TAG=0x00 appears as a v1 first byte: compact=no expanded=no
@@ -160,7 +170,7 @@ v1 wires the v2 decoder wrongly accepted: 0 [OK, all rejected]
 v1 wires the dispatcher routed correctly to v1: 720000 / 720000 [OK]
 ```
 
-So the answer is: a v2 decoder handed an old v1 id **rejects it cleanly** (throws, never a silent misread), and the real deployment is a five-line dispatcher, "first byte `0x00` means v2, `0x01` means v1-full, anything else means v1-condensed", which routes every id to the right decoder. It also works the other way: an old v1 reader handed a v2 wire sees a `0x00` first byte, finds no matching condensed prefix, and throws, so old code refuses new ids instead of mangling them. Both directions fail loud, which is exactly what you want from a format bump. (Reproduce with `./build/cuuid_v2_demo --compat`.)
+So the answer is: a v2 decoder handed an old v1 id **rejects it cleanly** (throws, never a silent misread), and the real deployment is a five-line dispatcher, "first byte `0x00` means v2, `0x01` means v1-full, anything else means v1-condensed", which routes every id to the right decoder. It also works the other way: an old v1 reader handed a v2 wire sees a `0x00` first byte, finds no matching condensed prefix, and throws, so old code refuses new ids instead of mangling them. Both directions fail loud, which is exactly what you want from a format bump. (Reproduce with `./build/cuuid_v2_demo --compat` and `python3 prototype/analysis.py`.)
 
 ### The time encoding
 
