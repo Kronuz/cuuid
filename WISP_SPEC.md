@@ -87,6 +87,24 @@ Xapiand's value serialiser guesses a string's type and, on a miss, throws, so th
 
 Because the sentinel is distinct from `~`, the fast-path tells `wisp` from cuuid (and from every other typed grammar) in a single character compare, with no wire cost.
 
+## Reserved ids (well-known sentinels)
+
+Some use cases want a fixed, recognizable id: an empty/default value, or the bounds of a range scan. `wisp` reserves a small set of **well-known ids** with short, deliberate text names, so you get `$nil` instead of the lucky-accident `~notmet` cuuid stumbled into.
+
+Because a `wisp` is UUIDv6-compatible, it adopts RFC 9562's two reserved UUIDs directly, which also makes them interoperable and correctly ordered:
+
+| name | value | sorts | use |
+|---|---|---|---|
+| `$nil` | `00000000-0000-0000-0000-000000000000` (all zeros, RFC Nil) | first | empty / unset / "no id" / lower bound |
+| `$max` | `ffffffff-ffff-ffff-ffff-ffffffffffff` (all ones, RFC Max) | last | upper bound of a range scan / sentinel end |
+
+- **They are outside the generated space.** A real `wisp` is version 6; the Nil's version nibble is 0 and the Max's is F, so the generator can never produce either by accident. They are pure sentinels.
+- **Text form is the name, not the bytes.** Encoding recognizes a reserved value and emits `<S>nil` / `<S>max` (the literal short name after the sentinel); parsing maps those names back to the reserved value. So they read as `$nil` / `$max`, short and memorable, while still being detected by the same one-character fast-path.
+- **They sort correctly by value.** Nil is all-zeros (sorts first, so it doubles as `$min`), Max is all-ones (sorts last), which is exactly what range bounds need. Only the *text spelling* of these specific ids is a name rather than the base32 body; the underlying bytes still order correctly.
+- **The namespace is extensible.** More well-known ids can be reserved from the same non-version-6 space if a use case needs them (a `$root`, a per-deployment constant), each a name in the registry. Keep the set small; `$nil` and `$max` cover most needs.
+
+This is a text/registry feature, so it costs nothing on the wire for normal ids.
+
 ## Properties, by where they live
 
 In the wire (entropy only):
@@ -130,3 +148,4 @@ The prototype (`Kronuz/cuuid/prototype/`) already validated the load-bearing par
 5. **Type handling.** Contextual (field implies type) with an optional text prefix, versus a few opt-in low bits for context-free typed ids. Recommend contextual + text prefix, no wire cost, unless context-free typing is a real requirement.
 6. **Checksum.** Ship the text checksum char in v1, or defer. It is text-only (zero wire cost), so cheap to include.
 7. **Which opt-in modes ship in v1** (compact/expanded, monotonic, fixed-length, unguessable) versus reserved for later.
+8. **Reserved-id set.** Ship `$nil` and `$max` (recommended, RFC-backed); reserve any others (`$root`, per-deployment constants) only if a concrete use case needs them.
