@@ -180,6 +180,37 @@ int main(int argc, char** argv) {
 		            N, fail_c, fail_e, (fail_c == 0 && fail_e == 0) ? "[OK]" : "[FAIL]");
 	}
 
+	// ---------- 1b. VL-folded wire: round-trip, size (8 bytes), sortability ----------
+	{
+		constexpr std::size_t N = 200000;
+		std::size_t fail_c = 0, fail_e = 0, csize = 0, esize = 0;
+		std::vector<std::string> sorted_run;
+		for (std::size_t i = 0; i < N; ++i) {
+			uint64_t t = now_greg + (rng() % 315569520000ULL) * 10000ULL;
+			uint16_t c = static_cast<uint16_t>(rng() & 0x3fff);
+			uint64_t n = 0x020000000000ULL | (rng() & 0xffffffffffULL);
+			Id comp{t, c, n};
+			cuuid_v2::crush(comp);
+			std::string wc = cuuid_v2::encode_vl(comp);
+			if (!(cuuid_v2::decode_vl(wc) == comp)) ++fail_c;
+			csize += wc.size();
+			Id exp{t, c, n};
+			std::string we = cuuid_v2::encode_vl(exp);
+			if (!(cuuid_v2::decode_vl(we) == exp)) ++fail_e;
+			esize += we.size();
+		}
+		// sortability: strictly increasing time -> VL wire must sort
+		for (std::size_t i = 0; i < 50000; ++i) {
+			Id id{now_greg + i * 500000ULL, static_cast<uint16_t>(i & 0x3fff), 0};
+			cuuid_v2::crush(id);
+			sorted_run.push_back(cuuid_v2::encode_vl(id));
+		}
+		std::printf("1b. VL-folded wire (final format): compact fails=%zu, expanded fails=%zu  %s\n",
+		            fail_c, fail_e, (fail_c == 0 && fail_e == 0) ? "[OK]" : "[FAIL]");
+		std::printf("    avg size compact %.2f B (was 9 with a length byte), expanded %.2f B; sortable %.4f\n\n",
+		            static_cast<double>(csize) / N, static_cast<double>(esize) / N, sorted_fraction(sorted_run));
+	}
+
 	// ---------- 2. Codec speed vs real cuuid compact ----------
 	{
 		constexpr std::size_t N = 200000;

@@ -164,6 +164,103 @@ inline Id from_v6_bytes(const std::array<uint8_t, 16>& b) {
 	return id;
 }
 
+// ---- VL-folded framing (0 length-byte overhead), reusing v1's proven length table ----
+// The length is folded into the top (spare) bits of the first content byte instead of a
+// separate length byte, so a v6 compact id is 8 bytes (not 9), matching v1. The table and
+// stripping logic are lifted verbatim from uuid.cc's UUIDCondenser, which is format-agnostic:
+// it length-prefixes an arbitrary big-endian value and is order-preserving (keeps the wire
+// sortable). Index 0..12 = serialised lengths 4..16.
+static constexpr uint8_t VL_[13][2][2] = {
+	{{0x1c, 0xfc}, {0x1c, 0xfc}}, {{0x18, 0xfc}, {0x18, 0xfc}}, {{0x14, 0xfc}, {0x14, 0xfc}},
+	{{0x10, 0xfc}, {0x10, 0xfc}}, {{0x04, 0xfc}, {0x40, 0xc0}}, {{0x0a, 0xfe}, {0xa0, 0xe0}},
+	{{0x08, 0xfe}, {0x80, 0xe0}}, {{0x02, 0xff}, {0x20, 0xf0}}, {{0x03, 0xff}, {0x30, 0xf0}},
+	{{0x0c, 0xff}, {0xc0, 0xf0}}, {{0x0d, 0xff}, {0xd0, 0xf0}}, {{0x0e, 0xff}, {0xe0, 0xf0}},
+	{{0x0f, 0xff}, {0xf0, 0xf0}},
+};
+
+inline void put_vl(std::string& out, uint64_t hi, uint64_t lo) {
+	uint8_t buf[17];
+	buf[0] = 0;
+	for (int i = 0; i < 8; ++i) buf[1 + i] = static_cast<uint8_t>(hi >> ((7 - i) * 8));
+	for (int i = 0; i < 8; ++i) buf[9 + i] = static_cast<uint8_t>(lo >> ((7 - i) * 8));
+	uint8_t* end = buf + 13; // 17 - 4: the low 4 bytes are always emitted (min length 4)
+	uint8_t* ptr = buf;
+	while (ptr != end && *(++ptr) == 0) {}       // strip leading zero bytes
+	int length = static_cast<int>(end - ptr);
+	if ((*ptr & VL_[length][0][1]) != 0) {
+		if ((*ptr & VL_[length][1][1]) != 0) {
+			--ptr; ++length; *ptr |= VL_[length][0][0];
+		} else {
+			*ptr |= VL_[length][1][0];
+		}
+	} else {
+		*ptr |= VL_[length][0][0];
+	}
+	out.append(reinterpret_cast<const char*>(ptr), length + 4);
+}
+
+inline void get_vl(std::string_view wire, uint64_t& hi, uint64_t& lo) {
+	const uint8_t* p = reinterpret_cast<const uint8_t*>(wire.data());
+	int size = static_cast<int>(wire.size());
+	int l = size > 0 ? p[0] : 0;
+	bool q = (l & 0xf0) != 0;
+	int i = 0;
+	for (; i < 13; ++i) {
+		if (VL_[i][q][0] == (l & VL_[i][q][1])) break;
+	}
+	int length = i + 4;
+	if (i == 13 || size < length) throw std::runtime_error("v6: bad VL length");
+	uint8_t buf[17] = {0};
+	uint8_t* start = buf + 17 - length;
+	std::memcpy(start, p, static_cast<size_t>(length));
+	*start &= static_cast<uint8_t>(~VL_[i][q][1]);
+	hi = 0; lo = 0;
+	for (int k = 1; k < 9; ++k) hi = (hi << 8) | buf[k];
+	for (int k = 9; k < 17; ++k) lo = (lo << 8) | buf[k];
+}
+
+// v6 encode/decode with VL-folded framing (final wire: 8 bytes compact, no length byte).
+inline std::string encode_vl(const Id& id) {
+	std::string out;
+	uint8_t salt = static_cast<uint8_t>(id.node & SALT_MASK);
+	uint64_t v2ms = greg_to_v2ms(id.time);
+	bool compact = (id.node == reconstruct_node(v2ms, id.clock, salt));
+	__uint128_t v;
+	if (compact) {
+		v = (static_cast<__uint128_t>(v2ms) << 22) | (static_cast<__uint128_t>(id.clock & CLOCK_MASK) << 8) |
+		    (static_cast<__uint128_t>(salt) << 1) | 1u;
+	} else {
+		v = (static_cast<__uint128_t>(v2ms) << 63) | (static_cast<__uint128_t>(id.clock & CLOCK_MASK) << 49) |
+		    (static_cast<__uint128_t>(id.node & NODE_MASK) << 1);
+	}
+	put_vl(out, static_cast<uint64_t>(v >> 64), static_cast<uint64_t>(v));
+	return out;
+}
+
+inline Id decode_vl(std::string_view wire) {
+	uint64_t hi, lo;
+	get_vl(wire, hi, lo);
+	__uint128_t v = (static_cast<__uint128_t>(hi) << 64) | lo;
+	Id id;
+	bool compact = (static_cast<uint64_t>(v) & 1u) != 0;
+	if (compact) {
+		uint8_t salt = static_cast<uint8_t>((v >> 1) & SALT_MASK);
+		uint64_t clk = static_cast<uint64_t>((v >> 8) & CLOCK_MASK);
+		uint64_t v2ms = static_cast<uint64_t>(v >> 22);
+		id.clock = static_cast<uint16_t>(clk);
+		id.time = v2ms_to_greg(v2ms);
+		id.node = reconstruct_node(v2ms, id.clock, salt);
+	} else {
+		uint64_t node = static_cast<uint64_t>((v >> 1) & NODE_MASK);
+		uint64_t clk = static_cast<uint64_t>((v >> 49) & CLOCK_MASK);
+		uint64_t v2ms = static_cast<uint64_t>(v >> 63);
+		id.clock = static_cast<uint16_t>(clk);
+		id.node = node;
+		id.time = v2ms_to_greg(v2ms);
+	}
+	return id;
+}
+
 // Order-preserving variable-length big-endian: strip leading zero bytes, then
 // prefix one length byte. [len][minimal big-endian] sorts lexicographically by
 // value because a larger value never has fewer bytes.
