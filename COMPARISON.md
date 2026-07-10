@@ -11,10 +11,10 @@
 Measured on an M-series Mac, the honest picture is:
 
 - **Size.** A compacted cuuid is **8 bytes** for any present-day timestamp, the same as a 64-bit Snowflake and half of UUIDv7's 16, but without Snowflake's worker-id coordination. The often-quoted 4-byte figure is real only for timestamps within about a year of cuuid's 2016 epoch; the existing `serialise_parse` benchmark hits it because it feeds near-zero timestamps.
-- **Sortable? Yes.** The condensed wire puts time in the most-significant bits, so it sorts lexicographically by creation time, down to a **~1.64 ms** resolution floor. This is the answer to "can cuuid be sorted like Snowflake": on the wire, yes. In its **canonical 16-byte v1 form, no** (the classic v1 problem UUIDv6 exists to fix).
-- **Cost.** The compact path costs **~850 to 950 ns to encode and to decode**, versus single-digit nanoseconds for Snowflake, UUIDv7, UUIDv6, and ULID. Nearly all of it is one `std::mt19937` **construction** inside `calculate_node()`. Swapping in a cheap mixer (splitmix64) does the identical job in **~2 ns**, a ~440x difference, but changes the wire bytes, so it is a format-v2 change, not a drop-in.
+- **Sortable? Yes.** The condensed wire puts time in the most-significant bits, so it sorts lexicographically by creation time, down to a **~1.64 ms** resolution floor. This is the answer to "can cuuid be sorted like Snowflake": on the wire, yes. In its **canonical 16-byte v1 form, no** (the classic v1 problem UUIDv6 exists to fix), which is exactly what the shipped **v6** format cures by storing the bytes in UUIDv6 order.
+- **Cost.** The compact path costs **~850 to 950 ns to encode and to decode**, versus single-digit nanoseconds for Snowflake, UUIDv7, UUIDv6, and ULID. Nearly all of it is one `std::mt19937` **construction** inside `calculate_node()`. Swapping in a cheap mixer (splitmix64) does the identical job in **~2 ns**. This is now **shipped as the v6 format** (see [Two ways forward](#two-ways-forward)): reconstructing the node with splitmix64 drops the whole compact path to a measured **~9 ns to encode and ~16 ns to decode** (release, N = 200k), roughly 55 to 95x faster. It changes the reconstructed node bytes, so it is a new format, told apart from v1 by the standard UUID version nibble rather than a drop-in patch.
 
-**Verdict.** cuuid earns its keep in exactly one niche: a store that keeps billions of ids as keys, wants them small and time-sortable, cannot pay for coordination, and controls both ends of the wire. That is Xapiand, where it was born. For a greenfield system in 2026 the better default is **UUIDv7** (standard, sortable, no MAC leak, libraries everywhere), or **Snowflake** if a 64-bit id and worker coordination are acceptable, or **UUIDv6** if you specifically want the v1 data model made natively sortable. The Mersenne-Twister cost is a fixable wart, not a design law.
+**Verdict.** cuuid earns its keep in exactly one niche: a store that keeps billions of ids as keys, wants them small and time-sortable, cannot pay for coordination, and controls both ends of the wire. That is Xapiand, where it was born. For a greenfield system in 2026 the better default is **UUIDv7** (standard, sortable, no MAC leak, libraries everywhere), or **Snowflake** if a 64-bit id and worker coordination are acceptable, or **UUIDv6** if you specifically want the v1 data model made natively sortable. The Mersenne-Twister cost was a fixable wart, not a design law, and the **v6** format fixes it while keeping the 8-byte wire.
 
 ## What each one actually is
 
@@ -107,14 +107,23 @@ Below its time resolution, a scheme keeps order only if it has a monotone tie-br
 
 **Worst case (breaks down, though never incorrect):**
 
-- **Read-heavy workloads.** Every decode of a compacted id runs a Mersenne-Twister construction (~880 ns). At millions of reads per second that is real CPU and real money.
+- **Read-heavy workloads.** Every decode of a compacted **v1** id runs a Mersenne-Twister construction (~880 ns). At millions of reads per second that is real CPU and real money. (The **v6** format removes this: splitmix64 reconstruction decodes in ~16 ns.)
 - **Sub-millisecond ordering.** Anything needing strict order at finer than ~1.64 ms will not get it from the condensed wire.
-- **Non-v1 UUIDs.** A v4 (random) UUID has no compressible structure, so cuuid falls back to the full 17-byte form (tag + 16 bytes), which is **larger** than a raw 16-byte UUID. The compression is a v1-only trick.
-- **Canonical-form sortability and privacy.** If a consumer sorts or indexes the canonical 16 bytes rather than the wire, it gets v1's non-sortability and its MAC-address leak.
+- **Non-v1 UUIDs.** A v4 (random) UUID has no compressible structure, so cuuid falls back to the full 17-byte form (tag + 16 bytes), which is **larger** than a raw 16-byte UUID. The compression is a v1/v6-only trick.
+- **Canonical-form sortability and privacy.** If a consumer sorts or indexes the canonical 16 bytes rather than the wire, **v1** gives non-sortability and a MAC-address leak. (The **v6** format fixes the sortability: its canonical bytes are UUIDv6, time-ordered; the node is still a synthetic, salted value, not a MAC.)
 
 Nothing here is a correctness bug. These are the honest edges of a design that traded CPU and a custom format for bytes on disk.
 
 ## Two ways forward
+
+> **Update: both of these shipped, combined, as the `v6` format.** It lives beside v1
+> (`cuuid_v6.{hh,cc}` + the shared `cuuid_common`), is told apart on encode by the UUID
+> **version nibble** (1 vs 6), and reuses v1's condenser, time base, and salt derivation
+> verbatim, swapping only `std::mt19937` for splitmix64 and laying the bytes out in UUIDv6
+> order. That makes it a smaller delta than the from-scratch prototype below (which explored
+> a separate ms-since-2026 time base and its own splitmix derivation). Measured on the shipped
+> library: **~9 ns encode, ~16 ns decode**, 8-byte compact wire, canonical form sorts by time.
+> Xapiand mints v6 by default; `--legacy-ids` pins pure v1.
 
 ### 1. Kill the Mersenne Twister (a format v2)
 
