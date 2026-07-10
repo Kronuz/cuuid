@@ -170,6 +170,34 @@ cross-language: C++ == Python == JavaScript [OK]
 
 So a v2 is three coordinated changes, not one, but it is a **simplifying** three: every port deletes its Mersenne Twister (the whole of `mertwis.py`) and replaces it with a four-line splitmix64, and the cross-system determinism stops being something you pray for and becomes something the arithmetic guarantees. That trade, three small coordinated ports against a permanently cheaper, natively-sortable, and easier-to-port format, is the actual decision, and it is a good one whenever the format is next revised.
 
+### Collisions and the millisecond question
+
+Storing the timestamp as milliseconds sounds coarser than v1's 100ns, so the fair worry is collisions. But the comparison is not against a full 100ns UUID, it is against the **compact form we actually used**, and that was never 100ns: v1's compact path folds the low 14 bits of the 100ns timestamp away, which quantizes it to `2^14 * 100ns = 1.6384 ms`. Against that real baseline, v2's 1ms is **finer**, not coarser.
+
+A compacted id on one node is unique per `(time bucket, clock_seq)` (the salt is `node & 0x7f`, fixed per node). So what matters is how many ids fall in one time bucket, and smaller buckets hold fewer. Before the 14-bit clock sequence is exhausted:
+
+| | time bucket | max ids/sec/node |
+|---|---|---|
+| full v1 (100ns, uncompacted) | 0.0001 ms | ~164 billion |
+| v1 compact (1.6384 ms fold) | 1.6384 ms | ~10 million |
+| **v2 compact (1 ms)** | 1.0 ms | **~16.4 million** |
+
+And if the clock sequence were random rather than a counter (the worst case), the birthday collision risk per node at 100k ids/sec is **~26% for v2 vs ~56% for v1 compact**. Either way v2 is the safer of the two compact forms. Cross-node uniqueness is unchanged: expanded ids still carry the full 48-bit node, and compact ids reduce it to the same 7-bit salt in both v1 and v2. So the move to milliseconds does not cost collision resistance against the form it replaces; it slightly improves it.
+
+### The compression idea, and the bigger win
+
+A tempting idea is to spend 2 or 3 header bits on a "compression" scheme, a floating epoch or an exponent that keeps the encoded timestamp short as the years pass. It does not pay off, for a concrete reason: a compact id is `time + clock(14) + salt(7) + flag(1)`, and that **21-bit clock-plus-salt floor is not compressible** (it is pseudo-random and load-bearing for collisions). A present-day timestamp needs about 35 bits per year at millisecond resolution, so a current id is already near `(35 + 21 + 1)/8 ~= 7 bytes`, and no exponent trick shrinks the part that dominates. An exponent only helps the far-future tail, and that tail grows logarithmically: a fixed 2026 ms epoch stays at an 8-byte payload until 2166 and only then ticks to 9. Spending per-id bits, in three languages, to save under a byte a century and a half out is a bad trade. If the epoch ever does need moving, the next format version moves it, for free.
+
+The compression worth having is the one **sortability already unlocks**. v2 ids sort by time, so in any sorted store (an LSM SSTable, a B-tree with prefix truncation, RocksDB) consecutive ids share their high-order bytes and the store keeps only the difference. Front-coding a sorted run of v2 compact ids measures like this:
+
+| generation rate | raw wire | front-coded | saved |
+|---|---|---|---|
+| 10 /s | 9.00 B | 5.10 B | 43% |
+| 1,000 /s | 9.00 B | 4.25 B | 53% |
+| 100,000 /s | 9.00 B | 3.51 B | 61% |
+
+The id drops to **3.5 to 5 bytes** stored, and it compresses *better* the faster you mint them, because more ids cluster into each shared time prefix. That is a general, standard, free win, and it is exactly the payoff of having made the ids sortable in the first place. The 2-3 bit scheme tries to hand-compress one id in isolation; the sorted store compresses the whole run for you, and does it better.
+
 ## The wider landscape (prior art)
 
 cuuid sits in a crowded field of "make an id that is unique, roughly time-ordered, and cheap to index". The recurring tension is the same everywhere: **coordination vs. randomness vs. size**, and how the timestamp is laid out for sorting.
