@@ -197,3 +197,19 @@ using NodeExpander = uint64_t (*)(uint32_t seed);
 // Reconstruct a compacted node from the condenser's (time, clock, salt), using the given
 // expander for the seed -> raw-node step. Identical for v1 and v6 apart from the expander.
 uint64_t calculate_node(const UUIDCondenser& condenser, NodeExpander expand);
+
+
+// The (time, clock, node) <-> condensed-wire core, shared by v1 and v6. `time` is the 60-bit
+// Gregorian-100ns UUID timestamp, `clock` the 14-bit clock sequence, `node` the 48-bit node.
+// The only per-format input is `expand` (v1: mt19937, v6: splitmix64); the 16-byte canonical
+// layout (v1 order vs UUIDv6 order) is the caller's job, done through its own field accessors.
+
+// Crush (time, clock, node) in place to compacted form (salt derivation + node reconstruction).
+void crush_fields(uint64_t& time, uint16_t& clock, uint64_t& node, NodeExpander expand);
+
+// (time, clock, node) -> condensed wire.
+std::string condense(uint64_t time, uint16_t clock, uint64_t node, NodeExpander expand);
+
+// condensed wire -> (time, clock, node); advances *ptr past the consumed bytes.
+void uncondense(const char** ptr, const char* end, uint64_t& time, uint16_t& clock, uint64_t& node, NodeExpander expand);
+

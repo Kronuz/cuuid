@@ -26,6 +26,12 @@
 #include <algorithm>                              // for std::copy_n, std::fill
 #include <cassert>                                // for assert
 
+#ifdef CUUID_NODE_HEADER
+#include CUUID_NODE_HEADER
+#else
+#include "cuuid_node.h"                           // for cuuid::local_node_hash
+#endif
+
 
 UUIDCondenser::UUIDCondenser()
 	: compact({ 0, 0, 0, 0, 0, 0 }) { }
@@ -152,4 +158,93 @@ UUIDCondenser::unserialise(const char** ptr, const char* end)
 
 	*ptr += length;
 	return condenser;
+}
+
+
+void
+crush_fields(uint64_t& time, uint16_t& clock, uint64_t& node, NodeExpander expand)
+{
+	L_CALL("crush_fields()");
+
+	auto compacted_time = time != 0u ? ((time - UUID_TIME_INITIAL) & TIME_MASK) : time;
+	auto compacted_time_clock = compacted_time & CLOCK_MASK;
+	compacted_time >>= CLOCK_BITS;
+
+	UUIDCondenser condenser;
+	condenser.compact.compacted = 1u;
+	condenser.compact.clock = clock ^ compacted_time_clock;
+	condenser.compact.time = compacted_time;
+	if ((node & MULTICAST_BIT) != 0u) {
+		condenser.compact.salt = node & SALT_MASK;
+	} else {
+		auto lnh = ::cuuid::local_node_hash();
+		auto salt = fnv_1a((lnh ? *lnh : 0) | node); // bitwise OR mixes the node identity into the salt. (Was `|| node` in Xapiand -- a logical OR that collapsed every non-zero node to a single salt; fixed here, which changes newly-compacted UUID salt bits vs older versions.)
+		salt = xor_fold(salt, SALT_BITS);
+		condenser.compact.salt = salt & SALT_MASK;
+	}
+
+	node = calculate_node(condenser, expand);
+	clock = static_cast<uint16_t>(condenser.compact.clock);
+
+	uint64_t t = condenser.compact.time;
+	if (t != 0u) {
+		t = ((t << CLOCK_BITS) + UUID_TIME_INITIAL) & TIME_MASK;
+	}
+	time = t;
+}
+
+
+std::string
+condense(uint64_t time, uint16_t clock, uint64_t node, NodeExpander expand)
+{
+	L_CALL("condense()");
+
+	auto compacted_time = time != 0u ? ((time - UUID_TIME_INITIAL) & TIME_MASK) : time;
+	auto compacted_time_clock = compacted_time & CLOCK_MASK;
+	compacted_time >>= CLOCK_BITS;
+
+	UUIDCondenser condenser;
+	condenser.compact.compacted = 1u;
+	condenser.compact.clock = clock ^ compacted_time_clock;
+	condenser.compact.time = compacted_time;
+	condenser.compact.salt = node & SALT_MASK;
+
+	auto compacted_node = calculate_node(condenser, expand);
+	if (node != compacted_node) {
+		condenser.expanded.compacted = 0u;
+		if ((node & MULTICAST_BIT) == 0u) {
+			if (time != 0u) {
+				time = (time - UUID_TIME_INITIAL) & TIME_MASK;
+			}
+		}
+		condenser.expanded.clock = clock;
+		condenser.expanded.time = time;
+		condenser.expanded.node = node;
+	}
+
+	return condenser.serialise();
+}
+
+
+void
+uncondense(const char** ptr, const char* end, uint64_t& time, uint16_t& clock, uint64_t& node, NodeExpander expand)
+{
+	L_CALL("uncondense({})", repr(*ptr, end));
+
+	UUIDCondenser condenser = UUIDCondenser::unserialise(ptr, end);
+
+	uint64_t n = condenser.compact.compacted != 0u ? calculate_node(condenser, expand) : condenser.expanded.node;
+
+	uint64_t t = condenser.compact.time;
+	if (t != 0u) {
+		if (condenser.compact.compacted != 0u) {
+			t = ((t << CLOCK_BITS) + UUID_TIME_INITIAL) & TIME_MASK;
+		} else if ((n & MULTICAST_BIT) == 0u) {
+			t = (t + UUID_TIME_INITIAL) & TIME_MASK;
+		}
+	}
+
+	time = t;
+	clock = static_cast<uint16_t>(condenser.compact.clock);
+	node = n;
 }

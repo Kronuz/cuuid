@@ -23,7 +23,7 @@
 
 #include "cuuid_v1.hh"
 
-#include "cuuid_common.h"                         // for UUIDCondenser, calculate_node, constants, fnv_1a, xor_fold
+#include "cuuid_common.h"                         // for UUIDCondenser, condense/uncondense, calculate_node, constants
 
 #include <algorithm>                              // for std::copy_n
 #include <cassert>                                // for assert
@@ -45,11 +45,6 @@
 #include CUUID_TRACE_HEADER
 #else
 #include "cuuid_trace.h"
-#endif
-#ifdef CUUID_NODE_HEADER
-#include CUUID_NODE_HEADER
-#else
-#include "cuuid_node.h"
 #endif
 
 
@@ -328,35 +323,13 @@ UUID::compact_crush()
 
 	if (uuid_variant() == 0x80 && uuid_version() == 1) {
 		auto node = uuid1_node();
-
 		auto clock = uuid1_clock_seq();
-
 		auto time = uuid1_time();
-		auto compacted_time = time != 0u ? ((time - UUID_TIME_INITIAL) & TIME_MASK) : time;
-		auto compacted_time_clock = compacted_time & CLOCK_MASK;
-		compacted_time >>= CLOCK_BITS;
 
-		UUIDCondenser condenser;
-		condenser.compact.compacted = 1u;
-		condenser.compact.clock = clock ^ compacted_time_clock;
-		condenser.compact.time = compacted_time;
-		if ((node & 0x010000000000) != 0u) {
-			condenser.compact.salt = node & SALT_MASK;
-		} else {
-			auto lnh = ::cuuid::local_node_hash();
-			auto salt = fnv_1a((lnh ? *lnh : 0) | node); // bitwise OR mixes the node identity into the salt. (Was `|| node` in Xapiand -- a logical OR that collapsed every non-zero node to a single salt; fixed here, which changes newly-compacted v1 UUID salt bits vs older versions.)
-			salt = xor_fold(salt, SALT_BITS);
-			condenser.compact.salt = salt & SALT_MASK;
-		}
+		crush_fields(time, clock, node, expand_mt);
 
-		uuid1_node(calculate_node(condenser, expand_mt));
-
-		uuid1_clock_seq(condenser.compact.clock);
-
-		time = condenser.compact.time;
-		if (time != 0u) {
-			time = ((time << CLOCK_BITS) + UUID_TIME_INITIAL) & TIME_MASK;
-		}
+		uuid1_node(node);
+		uuid1_clock_seq(clock);
 		uuid1_time(time);
 	}
 
@@ -394,35 +367,7 @@ UUID::serialise_condensed() const
 {
 	L_CALL("UUID::serialise_condensed()");
 
-	auto node = uuid1_node();
-
-	auto clock = uuid1_clock_seq();
-
-	auto time = uuid1_time();
-	auto compacted_time = time != 0u ? ((time - UUID_TIME_INITIAL) & TIME_MASK) : time;
-	auto compacted_time_clock = compacted_time & CLOCK_MASK;
-	compacted_time >>= CLOCK_BITS;
-
-	UUIDCondenser condenser;
-	condenser.compact.compacted = 1u;
-	condenser.compact.clock = clock ^ compacted_time_clock;
-	condenser.compact.time = compacted_time;
-	condenser.compact.salt = node & SALT_MASK;
-
-	auto compacted_node = calculate_node(condenser, expand_mt);
-	if (node != compacted_node) {
-		condenser.expanded.compacted = 0u;
-		if ((node & 0x010000000000) == 0u) {
-			if (time != 0u) {
-				time = (time - UUID_TIME_INITIAL) & TIME_MASK;
-			}
-		}
-		condenser.expanded.clock = clock;
-		condenser.expanded.time = time;
-		condenser.expanded.node = node;
-	}
-
-	return condenser.serialise();
+	return condense(uuid1_time(), uuid1_clock_seq(), uuid1_node(), expand_mt);
 }
 
 
@@ -567,26 +512,17 @@ UUID::unserialise_condensed(const char** ptr, const char* end)
 {
 	L_CALL("UUID::unserialise_condensed({})", repr(*ptr, end));
 
-	UUIDCondenser condenser = UUIDCondenser::unserialise(ptr, end);
-
-	uint64_t node = condenser.compact.compacted != 0u ? calculate_node(condenser, expand_mt) : condenser.expanded.node;
-
-	uint64_t time = condenser.compact.time;
-	if (time != 0u) {
-		if (condenser.compact.compacted != 0u) {
-			time = ((time << CLOCK_BITS) + UUID_TIME_INITIAL) & TIME_MASK;
-		} else if ((node & 0x010000000000) == 0u) {
-			time = (time + UUID_TIME_INITIAL) & TIME_MASK;
-		}
-	}
+	uint64_t time, node;
+	uint16_t clock;
+	uncondense(ptr, end, time, clock, node, expand_mt);
 
 	uint32_t time_low = time & 0xffffffffULL;
 	uint16_t time_mid = (time >> 32) & 0xffffULL;
 	uint16_t time_hi_version = (time >> 48) & 0xfffULL;
 	time_hi_version |= 0x1000ULL; // Version 1: RFC 4122
 
-	uint8_t clock_seq_hi_variant = condenser.compact.clock >> 8 | 0x80ULL;  // Variant: RFC 4122
-	uint8_t clock_seq_low = condenser.compact.clock & 0xffULL;
+	uint8_t clock_seq_hi_variant = clock >> 8 | 0x80ULL;  // Variant: RFC 4122
+	uint8_t clock_seq_low = clock & 0xffULL;
 
 	UUID out;
 	auto time_low_ptr = reinterpret_cast<uint32_t*>(&out._bytes[0]);
