@@ -82,10 +82,36 @@ def compression_report() -> None:
         fc = front_code_bytes(wires)
         print(f"{rate:>10} | {raw:>5.2f} B | {fc:>10.2f} B | {1 - fc / raw:>5.0%}")
     print(
-        "A current standalone compact id floors near 7 bytes (21-bit clock+salt is not"
+        "A current standalone compact id is ~8 bytes; a sorted store front-codes the run to"
     )
     print(
-        "compressible); a sorted store front-codes the run to ~4-5 bytes, better at higher rate."
+        "~4-5 bytes, and it compresses better the faster you mint (more shared time prefix)."
+    )
+    print()
+    # And it ABSORBS the wire's growth over time: the extra bytes are all high time-prefix bytes
+    # that temporally-close ids share, so the stored size is flat across eras even as the raw grows.
+    print(
+        "  Front-coding absorbs the size schedule's growth (same 1000 ids/s, different eras):"
+    )
+    print(f"    {'era':>10} | {'raw wire':>8} | {'front-coded':>11}")
+    yr_ms = 31556952000
+    for label, base in [
+        ("2026", v2.EPOCH_2026_MS + 190 * 86400 * 1000),
+        ("2166", v2.EPOCH_2026_MS + 140 * yr_ms),
+        ("year 5000", v2.EPOCH_2026_MS + 2974 * yr_ms),
+        ("year 50000", v2.EPOCH_2026_MS + 47974 * yr_ms),
+    ]:
+        wires = []
+        for i in range(20000):
+            greg = v2.GREG_EPOCH_100NS + (base + i) * 10000
+            t, c, n = v2.crush(
+                greg, random.getrandbits(14), 0x020000000000 | random.getrandbits(40)
+            )
+            wires.append(v2.encode(t, c, n))
+        raw = sum(len(w) for w in wires) / len(wires)
+        print(f"    {label:>10} | {raw:>6.2f} B | {front_code_bytes(wires):>9.2f} B")
+    print(
+        "  The raw wire grows with the era; the stored (front-coded) size stays ~flat forever."
     )
 
 

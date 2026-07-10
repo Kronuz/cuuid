@@ -261,11 +261,19 @@ The compression worth having is the one **sortability already unlocks**. v2 ids 
 
 | generation rate | raw wire | front-coded | saved |
 |---|---|---|---|
-| 10 /s | 9.00 B | 5.10 B | 43% |
-| 1,000 /s | 9.00 B | 4.25 B | 53% |
-| 100,000 /s | 9.00 B | 3.51 B | 61% |
+| 10 /s | 8.00 B | 5.10 B | 36% |
+| 1,000 /s | 8.00 B | 4.25 B | 47% |
+| 100,000 /s | 8.00 B | 3.51 B | 56% |
 
 The id drops to **3.5 to 5 bytes** stored, and it compresses *better* the faster you mint them, because more ids cluster into each shared time prefix. That is a general, standard, free win, and it is exactly the payoff of having made the ids sortable in the first place. The 2-3 bit scheme tries to hand-compress one id in isolation; the sorted store compresses the whole run for you, and does it better.
+
+And it makes the whole size schedule above almost moot. The wire grows only in its high time bytes, which are exactly the bytes temporally-close ids share, so front-coding absorbs the growth: at the same 1,000 ids/sec, the raw wire climbs 8 -> 10 -> 11 bytes from 2026 to the year 50,000, while the front-coded size stays flat at **4.25 bytes** the whole way. The standalone wire jumps a byte here and there; the *stored* id does not.
+
+| era | raw wire | front-coded |
+|---|---|---|
+| 2026 | 8.00 B | 4.25 B |
+| 2166 | 10.00 B | 4.25 B |
+| year 50,000 | 11.00 B | 4.25 B |
 
 ## The wider landscape (prior art)
 
