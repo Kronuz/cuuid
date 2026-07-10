@@ -43,6 +43,38 @@ function reconstructNode(v2ms, clock, salt) {
   return node;
 }
 
+function fnv1a(num) {
+  // matches Xapiand contrib fnv_1a
+  let fnv = 0xcbf29ce484222325n;
+  while (num) {
+    fnv ^= num & 0xffn;
+    fnv = (fnv * 0x100000001b3n) & MASK64;
+    num >>= 8n;
+  }
+  return fnv;
+}
+
+function xorFold(num, bits) {
+  let folded = 0n;
+  while (num) {
+    folded ^= num;
+    num >>= bits;
+  }
+  return folded;
+}
+
+function nodeSalt(node) {
+  // synthetic node keeps its low 7 bits; a real node is hashed so salts spread uniformly
+  if (node & MULTICAST) return node & SALT_MASK;
+  return xorFold(fnv1a(node), 7n) & SALT_MASK;
+}
+
+function crush(time, clock, node) {
+  const salt = nodeSalt(node);
+  const v2ms = gregToV2ms(time);
+  return [v2msToGreg(v2ms), clock, reconstructNode(v2ms, clock, salt)];
+}
+
 function toV6Bytes(time, clock, node) {
   const th = (time >> 28n) & 0xffffffffn;
   const tm = (time >> 12n) & 0xffffn;

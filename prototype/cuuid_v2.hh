@@ -83,6 +83,25 @@ struct Id {
 	}
 };
 
+// FNV-1a and xor-fold, matching Xapiand's v1 salt derivation exactly (contrib fnv_1a/xor_fold).
+inline uint64_t fnv_1a(uint64_t num) {
+	uint64_t fnv = 0xcbf29ce484222325ULL;
+	while (num) {
+		fnv ^= (num & 0xff);
+		fnv *= 0x100000001b3ULL;
+		num >>= 8;
+	}
+	return fnv;
+}
+inline uint64_t xor_fold(uint64_t num, unsigned bits) {
+	uint64_t folded = 0;
+	while (num) {
+		folded ^= num;
+		num >>= bits;
+	}
+	return folded;
+}
+
 // Reconstruct the synthetic node of a compacted id from the wire-native fields
 // (ms-since-2026, clock, salt). Deterministic; carries the salt, sets the multicast bit.
 inline uint64_t reconstruct_node(uint64_t v2ms, uint16_t clock, uint8_t salt) {
@@ -94,11 +113,19 @@ inline uint64_t reconstruct_node(uint64_t v2ms, uint16_t clock, uint8_t salt) {
 	return node;
 }
 
+// The 7-bit salt of a real node. Like v1: an already-synthetic node (multicast bit set) keeps
+// its low 7 bits; a real node is hashed (xor-folded FNV-1a) so the 128 salt buckets are spread
+// uniformly regardless of how node values are distributed. (local_node_hash defaults to 0.)
+inline uint8_t node_salt(uint64_t node) {
+	if (node & MULTICAST) return static_cast<uint8_t>(node & SALT_MASK);
+	return static_cast<uint8_t>(xor_fold(fnv_1a(node), SALT_BITS) & SALT_MASK);
+}
+
 // Make an id's node synthetic AND normalize its timestamp to ms granularity (the v2
 // equivalent of compact_crush). After this, a compact encode/decode round-trips exactly.
 // Assumes time >= the 2026 epoch (a prototype simplification; production guards earlier ids).
 inline void crush(Id& id) {
-	uint8_t salt = static_cast<uint8_t>(id.node & SALT_MASK);
+	uint8_t salt = node_salt(id.node);
 	uint64_t v2ms = greg_to_v2ms(id.time);
 	id.time = v2ms_to_greg(v2ms);                 // sub-ms digits zeroed
 	id.node = reconstruct_node(v2ms, id.clock, salt);

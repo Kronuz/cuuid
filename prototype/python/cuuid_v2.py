@@ -52,8 +52,33 @@ def reconstruct_node(v2ms: int, clock: int, salt: int) -> int:
     return node
 
 
+def fnv_1a(num: int) -> int:  # matches Xapiand contrib fnv_1a
+    fnv = 0xCBF29CE484222325
+    while num:
+        fnv ^= num & 0xFF
+        fnv = (fnv * 0x100000001B3) & MASK64
+        num >>= 8
+    return fnv
+
+
+def xor_fold(num: int, bits: int) -> int:
+    folded = 0
+    while num:
+        folded ^= num
+        num >>= bits
+    return folded
+
+
+def node_salt(node: int) -> int:
+    # v1's rule: a synthetic node (multicast bit) keeps its low 7 bits; a real node is hashed so
+    # the 128 salt buckets spread uniformly. (local_node_hash defaults to 0.)
+    if node & MULTICAST:
+        return node & SALT_MASK
+    return xor_fold(fnv_1a(node), SALT_BITS) & SALT_MASK
+
+
 def crush(time: int, clock: int, node: int) -> tuple[int, int, int]:
-    salt = node & SALT_MASK
+    salt = node_salt(node)
     v2ms = greg_to_v2ms(time)
     return (v2ms_to_greg(v2ms), clock, reconstruct_node(v2ms, clock, salt))
 
