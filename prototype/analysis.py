@@ -122,14 +122,15 @@ def tag_space_report() -> None:
         f"  bytes NO v1 wire can start with: {' '.join(f'0x{b:02x}' for b in invalid) or '(none)'}"
     )
     print(
-        f"  => 0x00 is the unique safe v2 tag. (0x02 is valid={valid_v1(0x02)}, i.e. UNSAFE.)"
+        "  => 0x00 is the only byte free for a binary tag; but base59 (the '~' text form) drops a"
     )
     print(
-        "  Proof, not sample: a full v1 wire is hard-coded 0x01, and a condensed wire strips"
+        "     leading zero byte, so 0x00 is unusable there too. Net: no leading version byte works"
     )
     print(
-        "  leading zeros then OR-s a nonzero prefix, so its first byte is always nonzero.\n"
+        "     at all (which is why v1 has none). v2 keeps a nonzero first byte and versions out of"
     )
+    print("     band. (0x02 is v1-valid, i.e. also unsafe. See strings_demo.py.)\n")
 
 
 if __name__ == "__main__":

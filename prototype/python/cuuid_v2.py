@@ -23,7 +23,9 @@ CLOCK_MASK = (1 << CLOCK_BITS) - 1
 NODE_MASK = (1 << NODE_BITS) - 1
 SALT_MASK = (1 << SALT_BITS) - 1
 MULTICAST = 0x010000000000
-V2_TAG = 0x00  # the one byte no v1 wire can start with (full is 0x01; condensed strips to nonzero)
+# No leading tag byte: base59 ("~" text form) drops leading zero bytes, so the first byte must
+# be nonzero. The wire is [length][payload]; length is always >= 1, and the payload's first byte
+# (time high bits) is nonzero. Versioning is out of band, never a leading tag. (See strings_demo.)
 
 
 def splitmix64(x: int) -> int:
@@ -88,14 +90,12 @@ def encode(time: int, clock: int, node: int) -> bytes:
     while start < 15 and buf[start] == 0:
         start += 1
     body = buf[start:]
-    return bytes([V2_TAG, len(body)]) + body
+    return bytes([len(body)]) + body
 
 
 def decode(wire: bytes) -> tuple[int, int, int]:
-    if not wire or wire[0] != V2_TAG:
-        raise ValueError("v2: not a v2 id")
-    length = wire[1]
-    v = int.from_bytes(wire[2 : 2 + length], "big")
+    length = wire[0]
+    v = int.from_bytes(wire[1 : 1 + length], "big")
     if v & 1:  # compact
         salt = (v >> 1) & SALT_MASK
         clock = (v >> 8) & CLOCK_MASK

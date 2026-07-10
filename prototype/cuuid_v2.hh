@@ -43,10 +43,13 @@ constexpr uint64_t NODE_MASK  = (1ULL << NODE_BITS) - 1;
 constexpr uint64_t SALT_MASK  = (1ULL << SALT_BITS) - 1;
 constexpr uint64_t MULTICAST  = 0x010000000000ULL;
 
-constexpr uint8_t  V2_TAG = 0x00; // the one byte no v1 wire can start with: v1 full is 0x01,
-                                  // and v1 condensed strips leading zeros so byte0 is always
-                                  // nonzero. So an old v1 reader rejects v2, and a dispatcher
-                                  // never misreads a v1 id as v2. (0x02 is a VL prefix -- unsafe.)
+// NOTE ON VERSIONING. An earlier draft prepended a 0x00 tag byte for dispatch. That is wrong
+// for Xapiand's text form: the "~" encoding is base59 of the wire bytes, and base59 folds them
+// into one big integer, so a LEADING ZERO byte is dropped and cannot be recovered. v1 avoids
+// this by guaranteeing a nonzero first byte (full form is 0x01; condensed strips leading zeros)
+// and carrying its compact/expanded flags in the TRAILING bytes. v2 follows the same rule: no
+// leading tag, the first byte is the nonzero length-prefixed time byte, and v1-vs-v2 is
+// distinguished out of band (index/schema version) or by a trailing bit, never a leading byte.
 
 // Gregorian 100ns  <->  v2 ms-since-2026 (the wire's time unit).
 inline uint64_t greg_to_v2ms(uint64_t greg) {
@@ -168,7 +171,6 @@ inline void get_varlen(const uint8_t*& p, const uint8_t* end, uint64_t& hi, uint
 // the timestamp is already ms-coarse, so sort granularity is 1ms with a clock tie-break.
 inline std::string encode(const Id& id) {
 	std::string out;
-	out.push_back(static_cast<char>(V2_TAG));
 
 	uint8_t salt = static_cast<uint8_t>(id.node & SALT_MASK);
 	uint64_t v2ms = greg_to_v2ms(id.time);
@@ -185,14 +187,12 @@ inline std::string encode(const Id& id) {
 		    (static_cast<__uint128_t>(id.node & NODE_MASK) << 1) | 0u;
 	}
 	put_varlen(out, static_cast<uint64_t>(v >> 64), static_cast<uint64_t>(v));
-	return out;
+	return out; // [length][payload]; first byte is the nonzero length, so base59-safe
 }
 
 inline Id decode(std::string_view wire) {
 	const uint8_t* p = reinterpret_cast<const uint8_t*>(wire.data());
 	const uint8_t* end = p + wire.size();
-	if (p >= end || *p != V2_TAG) throw std::runtime_error("v2: not a v2 id");
-	++p;
 	uint64_t hi, lo;
 	get_varlen(p, end, hi, lo);
 	__uint128_t v = (static_cast<__uint128_t>(hi) << 64) | lo;

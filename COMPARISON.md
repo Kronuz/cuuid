@@ -130,47 +130,53 @@ This is orthogonal to size: v6 is still 16 bytes canonical. The appealing combin
 
 ## Prototype: a working v2
 
-I built that v2 as a standalone prototype (`prototype/cuuid_v2.hh` and `prototype/v2_demo.cc`) to check the design end to end. It does not touch the frozen `uuid.hh` / `uuid.cc`; it stores as UUIDv6, reconstructs the compacted node with splitmix64, stores the timestamp as milliseconds since a 2026 epoch, keeps the variable-length wire, and carries a distinct tag byte (`0x00`) so old readers reject it and old ids never look like v2 (see "Backward compatibility" below). Measured (`./build/cuuid_v2_demo`, same machine):
+I built that v2 as a standalone prototype (`prototype/cuuid_v2.hh` and `prototype/v2_demo.cc`) to check the design end to end. It does not touch the frozen `uuid.hh` / `uuid.cc`; it stores as UUIDv6, reconstructs the compacted node with splitmix64, stores the timestamp as milliseconds since a 2026 epoch, and keeps the variable-length wire with a nonzero first byte so the `~` text form survives (see "Backward compatibility and the text form" below). Measured (`./build/cuuid_v2_demo`, same machine):
 
 | | v2 prototype | v1 (current) |
 |---|---|---|
 | encode | ~12 ns | ~880 ns |
 | decode | ~8 ns | ~850 ns |
-| compact payload | 4 bytes (2026) to 8 bytes (steady) | 8 bytes |
-| compact wire total | payload + 2 framing | 8 bytes |
+| compact wire | 4 bytes (2026) to 8 bytes (steady) | 8 bytes |
 | condensed wire sortable | yes (1.0000) | yes (1.0000) |
 | **canonical bytes sortable** | **yes (1.0000, v6)** | **no (v1)** |
 
 - **Correctness.** 200k random ids round-trip with zero failures in both compact and expanded modes, and through the canonical v6 form.
 - **Speed.** The Mersenne Twister is gone; encode and decode drop by ~70x and ~100x. This is the whole-codec number, not just the mixer in isolation.
 - **Sortability.** Both the condensed wire and the raw v6 bytes sort by creation time. The second one is the real gain: a consumer can index the canonical bytes directly, no codec on the read path at all.
-- **Coexistence.** Old and new ids live in one store, routed by the first byte (see below). Old data keeps decoding.
+- **Coexistence.** Old and new ids live in one store, versioned out of band (see below). Old data keeps decoding.
 
-### Backward compatibility: feeding old v1 ids to v2
+### Backward compatibility and the text form
 
-The important question for any format change: what happens to the ids already on disk? Xapiand stores them as the `~`-prefixed text form of these exact wire bytes, so a v2 reader will be handed old v1 wires constantly, and it must never silently misread one.
+Two things must hold when a format changes: the ids already on disk must keep decoding, and the new ids must survive Xapiand's `~` text encoding. That text form turns out to constrain the wire more than the binary side does, and it is worth walking through because it overturns an obvious-looking design.
 
-The tag choice is what makes this safe, and it is not free. The obvious pick, `0x02`, is a trap: `0x02` is a real entry in v1's length-prefix table (the length-11 code), so a v1 condensed wire genuinely can begin with it, and a dispatcher would then route an old id into the v2 decoder and hand back garbage. The safe pick is **`0x00`**, and it is safe by proof, not by sampling.
+Xapiand renders a serialised id as `~` followed by the **base59** of the wire bytes (`ENCODER = base_x.b59`). base59 folds the bytes into one big integer, so a **leading zero byte contributes nothing and cannot be recovered**. That single fact drives everything: the wire's first byte must be nonzero.
 
-A one-byte tag lives in a space of only 256 values, so "no v1 wire can start with this byte" is a claim you can settle **exhaustively**, not estimate. Enumerating all 256 against v1's exact decode rules:
+Now, the tempting way to version a new format is a leading tag byte, and there is exactly one byte that no v1 wire can start with. The tag space is only 256 values, so this is settled exhaustively, not sampled:
 
 ```text
 v1 uses 255 of 256 possible first bytes.
 bytes NO v1 wire can start with: 0x00
-=> 0x00 is the unique safe v2 tag. (0x02 is valid, i.e. UNSAFE.)
 ```
 
-`0x00` is the *only* byte no v1 wire can begin with, and the reason is structural, not statistical: a full v1 wire is the hard-coded byte `0x01`, and a condensed wire strips its leading zero bytes and then OR-s in a nonzero length prefix, so its first byte is always nonzero. The real library agrees: feeding it 256 buffers that start with `0x00` (varied trailing bytes) rejects all 256. This is also why a random sample, even a large one, cannot *ensure* the property: v1 can emit 255 distinct first bytes, so no finite sample covers the space; the proof does. The 720,000-id probe below is a cross-check, not the argument.
+`0x00` is the unique free byte, for a structural reason: a full v1 wire is the hard-coded `0x01`, and a condensed wire strips its leading zeros and then OR-s in a nonzero prefix, so its first byte is always nonzero. So the only byte available for a leading tag is `0x00`, and `0x00` is precisely the byte base59 destroys. The two constraints collide, and the conclusion is clean: **there is no usable leading version byte at all.** That is not a limitation of v2; it is why v1 itself has no version byte and carries its compact/expanded flags in the trailing bytes.
 
-With `0x00` as the tag, the prototype confirms the end-to-end behavior against the real library. It generates 720,000 v1 wires (compact and expanded, times spanning decades so every encoded length occurs) and feeds each to the v2 decoder and to a first-byte dispatcher:
+So v2 does the same. No leading tag: the wire is `[length][payload]`, the first byte is the nonzero length, and v1-versus-v2 is decided **out of band** (an index/schema version) rather than by staring at a byte. The prototype confirms the wire is text-safe and that a leading tag would not have been:
 
 ```text
-V2_TAG=0x00 appears as a v1 first byte: compact=no expanded=no
-v1 wires the v2 decoder wrongly accepted: 0 [OK, all rejected]
-v1 wires the dispatcher routed correctly to v1: 720000 / 720000 [OK]
+v1 distinct first bytes: 73   v2 distinct first bytes: 5   overlap: 3
+v2 wires that start with 0x00 (base59-unsafe): 0 [OK, all nonzero]
 ```
 
-So the answer is: a v2 decoder handed an old v1 id **rejects it cleanly** (throws, never a silent misread), and the real deployment is a five-line dispatcher, "first byte `0x00` means v2, `0x01` means v1-full, anything else means v1-condensed", which routes every id to the right decoder. It also works the other way: an old v1 reader handed a v2 wire sees a `0x00` first byte, finds no matching condensed prefix, and throws, so old code refuses new ids instead of mangling them. Both directions fail loud, which is exactly what you want from a format bump. (Reproduce with `./build/cuuid_v2_demo --compat` and `python3 prototype/analysis.py`.)
+Concretely, here is one id in every form (from `python3 prototype/strings_demo.py`):
+
+```text
+fields         time=140029344000000000 clock=6844 node=0x0ff76d02512b
+canonical v6   1f17bf24-b404-6000-9abc-0ff76d02512b
+binary wire    07f49e12001abc57   (8 bytes: 0x07 length + 7 payload)
+'~' base59     ~GEDryoPFbV6N
+```
+
+The first byte `0x07` is the length; it is nonzero, so `~GEDryoPFbV6N` round-trips back to the exact wire. Prepending a `0x00` tag would encode to the same base59 string as the tag-less wire, and decode back without the tag, silently, which is the whole reason the tag idea fails. (Reproduce with `./build/cuuid_v2_demo --compat` and `python3 prototype/strings_demo.py`.)
 
 ### The time encoding
 

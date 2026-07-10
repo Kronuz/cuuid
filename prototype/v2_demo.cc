@@ -3,7 +3,7 @@
 //   2. codec speed vs the real (frozen) cuuid compact path
 //   3. sortability of the v2 condensed wire AND the canonical v6 bytes
 //   4. wire size vs the real library
-//   5. coexistence: a v1 reader rejects a v2 tag; a dispatcher routes both
+//   5. coexistence: v1 and v2 both keep a nonzero first byte (base59-safe); versioned out of band
 //
 // Links the real cuuid (uuid.hh) for the head-to-head; the prototype is header-only.
 
@@ -84,11 +84,13 @@ int main(int argc, char** argv) {
 		return 0;
 	}
 
-	// --compat: feed a wide variety of REAL v1 wires to the v2 decoder and check what happens.
-	// The danger is a v1 wire whose first byte equals V2_TAG: a dispatcher would misroute it.
+	// --compat: how do v1 and v2 wires relate on the wire? base59 (the "~" text form) forbids a
+	// leading zero, so v2 cannot use a leading tag byte; its first byte, like v1's, is a nonzero
+	// length byte. This probe shows the two first-byte spaces OVERLAP, so v1-vs-v2 cannot be
+	// dispatched by the first byte and must be versioned out of band (index/schema) or a trailing bit.
 	if (argc > 1 && std::string(argv[1]) == "--compat") {
-		std::set<int> fb_compact, fb_expanded;
-		std::size_t v2_misreads = 0, dispatched_ok = 0, total = 0;
+		std::set<int> v1_fb, v2_fb;
+		std::size_t v2_leading_zero = 0, total = 0;
 		uint64_t yr = 315569520000ULL; // ~1y in ms
 		std::mt19937_64 r(0xD00D);
 		for (uint64_t ymul = 0; ymul < 90; ++ymul) {
@@ -96,50 +98,29 @@ int main(int argc, char** argv) {
 				uint64_t ms = (ymul * yr) + (r() % yr);
 				uint64_t greg = cuuid_v2::GREG_EPOCH_100NS + ms * 10000ULL;
 				uint16_t clk = static_cast<uint16_t>(r() & 0x3fff);
-				UUID base = make_v1(greg, clk, 0x010000000000ULL | (r() & 0xffffffffffULL));
 
-				UUID uc = base; uc.compact_crush();
-				std::string wc = uc.serialise();
-				UUID ue = make_v1(greg, clk, 0x020000000000ULL | (r() & 0xffffffffffULL));
-				std::string we = ue.serialise();
+				UUID uc = make_v1(greg, clk, 0x010000000000ULL | (r() & 0xffffffffffULL));
+				uc.compact_crush();
+				v1_fb.insert(static_cast<uint8_t>(uc.serialise()[0]));
 
-				for (const std::string* w : {&wc, &we}) {
-					int b0 = static_cast<uint8_t>((*w)[0]);
-					(w == &wc ? fb_compact : fb_expanded).insert(b0);
-					++total;
-					// Feed the v1 wire to the v2 decoder: it must REJECT (throw), never silently accept.
-					try { cuuid_v2::decode(*w); ++v2_misreads; } catch (...) {}
-					// A dispatcher (v2 tag -> v2, else -> v1) must still route it to the v1 decoder.
-					try {
-						if (b0 == cuuid_v2::V2_TAG) cuuid_v2::decode(*w);
-						else UUID::unserialise(*w);
-						++dispatched_ok;
-					} catch (...) {}
-				}
+				cuuid_v2::Id id{greg, clk, 0x020000000000ULL | (r() & 0xffffffffffULL)};
+				cuuid_v2::crush(id);
+				std::string w2 = cuuid_v2::encode(id);
+				int b0 = static_cast<uint8_t>(w2[0]);
+				v2_fb.insert(b0);
+				if (b0 == 0) ++v2_leading_zero;
+				++total;
 			}
 		}
-		auto dump = [](const char* n, const std::set<int>& s) {
-			std::printf("   %s first bytes (%zu distinct): ", n, s.size());
-			for (int b : s) std::printf("%02x ", b);
-			std::printf("\n");
-		};
-		std::printf("== v1 -> v2 compatibility probe (%zu v1 wires) ==\n", total);
-		dump("compact ", fb_compact);
-		dump("expanded", fb_expanded);
-		bool has02c = fb_compact.count(cuuid_v2::V2_TAG), has02e = fb_expanded.count(cuuid_v2::V2_TAG);
-		std::printf("   V2_TAG=0x%02x appears as a v1 first byte: compact=%s expanded=%s\n",
-		            cuuid_v2::V2_TAG, has02c ? "YES" : "no", has02e ? "YES" : "no");
-		std::printf("   v1 wires the v2 decoder wrongly accepted: %zu %s\n",
-		            v2_misreads, v2_misreads ? "[SILENT CORRUPTION -- unsafe tag]" : "[OK, all rejected]");
-		std::printf("   v1 wires the dispatcher routed correctly to v1: %zu / %zu %s\n",
-		            dispatched_ok, total, dispatched_ok == total ? "[OK]" : "[!!]");
-		// which byte values are NEVER used by v1 (safe tag candidates)?
-		std::printf("   bytes never used by any v1 wire (safe V2_TAG candidates): ");
-		std::set<int> all = fb_compact; all.insert(fb_expanded.begin(), fb_expanded.end());
-		all.insert(0x01); // full form
-		int shown = 0;
-		for (int b = 0; b < 256 && shown < 16; ++b) if (!all.count(b)) { std::printf("%02x ", b); ++shown; }
-		std::printf("...\n");
+		std::set<int> overlap;
+		for (int b : v2_fb) if (v1_fb.count(b)) overlap.insert(b);
+		std::printf("== v1 / v2 first-byte relationship (%zu ids each) ==\n", total);
+		std::printf("   v1 distinct first bytes: %zu   v2 distinct first bytes: %zu   overlap: %zu\n",
+		            v1_fb.size(), v2_fb.size(), overlap.size());
+		std::printf("   v2 wires that start with 0x00 (base59-unsafe): %zu %s\n",
+		            v2_leading_zero, v2_leading_zero ? "[BUG]" : "[OK, all nonzero]");
+		std::printf("   -> first bytes overlap, so v1-vs-v2 must be versioned OUT OF BAND,\n");
+		std::printf("      not by a leading tag byte (which base59 would drop anyway).\n");
 		return 0;
 	}
 
@@ -233,10 +214,10 @@ int main(int argc, char** argv) {
 		std::printf("   v2 condensed wire      %.4f\n", sorted_fraction(v2_wire));
 		std::printf("   v2 canonical v6 bytes  %.4f   <- v1 canonical is NOT sortable; v6 is\n\n", sorted_fraction(v2_v6));
 		std::printf("4. Wire size at current time (bytes)\n");
-		std::printf("   v2 compact total       %.2f  = 1 tag + 1 length + %.2f payload\n",
-		            static_cast<double>(c_total) / M, static_cast<double>(c_total) / M - 2);
-		std::printf("   v2 expanded total      %.2f  = 1 tag + 1 length + %.2f payload\n",
-		            static_cast<double>(e_total) / M, static_cast<double>(e_total) / M - 2);
+		std::printf("   v2 compact total       %.2f  = 1 length + %.2f payload (no leading tag)\n",
+		            static_cast<double>(c_total) / M, static_cast<double>(c_total) / M - 1);
+		std::printf("   v2 expanded total      %.2f  = 1 length + %.2f payload\n",
+		            static_cast<double>(e_total) / M, static_cast<double>(e_total) / M - 1);
 		std::printf("   v1 compact total       %.2f  (100ns/2016; VL folds length, no tag)\n",
 		            static_cast<double>(v1c_total) / M);
 		std::printf("   v2 compact PAYLOAD vs year (ms/2026 shrinks the time field ~2 bytes vs 100ns):\n");
@@ -249,12 +230,12 @@ int main(int argc, char** argv) {
 			std::printf("      %4llu (year %llu)  payload %zu bytes\n",
 			            static_cast<unsigned long long>(2026 + years),
 			            static_cast<unsigned long long>(years),
-			            cuuid_v2::encode(id).size() - 2);
+			            cuuid_v2::encode(id).size() - 1);
 		}
 		std::printf("\n");
 	}
 
-	// ---------- 5. Coexistence ----------
+	// ---------- 5. Coexistence / base59-safety ----------
 	{
 		UUID u1 = make_v1(now_greg, 0x1234, 0);
 		u1.compact_crush();
@@ -264,24 +245,15 @@ int main(int argc, char** argv) {
 		cuuid_v2::crush(id);
 		std::string w2 = cuuid_v2::encode(id);
 
-		std::printf("5. Coexistence\n");
+		std::printf("5. Coexistence / base59-safety\n");
 		std::printf("   v1 wire first byte = 0x%02x   v2 wire first byte = 0x%02x\n",
 		            static_cast<uint8_t>(w1[0]), static_cast<uint8_t>(w2[0]));
-
-		bool v1_rejects_v2 = false;
-		try { UUID::unserialise(w2); } catch (...) { v1_rejects_v2 = true; }
-		std::printf("   real cuuid decoder rejects the v2 wire: %s\n", v1_rejects_v2 ? "yes [OK]" : "no [!!]");
-
-		// a dispatcher routes both by first byte
-		auto dispatch_ok = [](const std::string& w) -> bool {
-			if (!w.empty() && static_cast<uint8_t>(w[0]) == cuuid_v2::V2_TAG) {
-				cuuid_v2::decode(w); return true;         // v2 path
-			}
-			UUID::unserialise(w); return true;            // v1 path (full or condensed)
-		};
-		bool routed = dispatch_ok(w1) && dispatch_ok(w2);
-		std::printf("   dispatcher decodes both v1 and v2 from one reader: %s\n", routed ? "yes [OK]" : "no [!!]");
+		std::printf("   both first bytes nonzero (base59 '~' text form safe): %s\n",
+		            (static_cast<uint8_t>(w1[0]) && static_cast<uint8_t>(w2[0])) ? "yes [OK]" : "no [!!]");
+		std::printf("   v1 and v2 both look 'condensed' on the wire, so v1-vs-v2 is versioned\n");
+		std::printf("   OUT OF BAND (index/schema), not by the first byte. (See --compat.)\n");
 	}
 
 	return 0;
 }
+

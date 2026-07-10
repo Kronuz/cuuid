@@ -17,7 +17,8 @@ const CLOCK_MASK = (1n << 14n) - 1n;
 const NODE_MASK = (1n << 48n) - 1n;
 const SALT_MASK = (1n << 7n) - 1n;
 const MULTICAST = 0x010000000000n;
-const V2_TAG = 0x00; // the one byte no v1 wire can start with (full is 0x01; condensed strips to nonzero)
+// No leading tag byte: base59 ("~" text form) drops leading zero bytes, so the first byte must
+// be nonzero. The wire is [length][payload]; versioning is out of band, never a leading tag.
 
 function splitmix64(x) {
   x = (x + 0x9e3779b97f4a7c15n) & MASK64;
@@ -84,18 +85,16 @@ function encode(time, clock, node) {
   let start = 0;
   while (start < 15 && buf[start] === 0) start++;
   const body = buf.slice(start);
-  const out = new Uint8Array(2 + body.length);
-  out[0] = V2_TAG;
-  out[1] = body.length;
-  out.set(body, 2);
+  const out = new Uint8Array(1 + body.length);
+  out[0] = body.length;
+  out.set(body, 1);
   return out;
 }
 
 function decode(wire) {
-  if (wire.length === 0 || wire[0] !== V2_TAG) throw new Error("v2: not a v2 id");
-  const length = wire[1];
+  const length = wire[0];
   let v = 0n;
-  for (let i = 0; i < length; i++) v = (v << 8n) | BigInt(wire[2 + i]);
+  for (let i = 0; i < length; i++) v = (v << 8n) | BigInt(wire[1 + i]);
   if (v & 1n) {
     const salt = (v >> 1n) & SALT_MASK;
     const clock = (v >> 8n) & CLOCK_MASK;
