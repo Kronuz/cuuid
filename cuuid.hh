@@ -68,6 +68,22 @@ inline UUID unserialise(std::string_view bytes, Codec codec = Codec::v6) {
 }
 
 
+// Decode a serialised list of UUIDs (the wire may pack several back to back).
+template <typename OutputIt>
+inline void unserialise(const char** ptr, const char* end, OutputIt d_first, Codec codec = Codec::v6) {
+	while (*ptr != end) {
+		*d_first++ = unserialise(ptr, end, codec);
+	}
+}
+
+template <typename OutputIt>
+inline void unserialise(std::string_view bytes, OutputIt d_first, Codec codec = Codec::v6) {
+	const char* pos = bytes.data();
+	const char* end = pos + bytes.size();
+	unserialise(&pos, end, d_first, codec);
+}
+
+
 // Mint a new id: v6 by default, v1 when Codec::v1 (pure legacy / --legacy-ids).
 inline UUID generate(Codec codec = Codec::v6, bool compact = true) {
 	if (codec == Codec::v6) {
