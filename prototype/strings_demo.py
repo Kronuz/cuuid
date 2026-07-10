@@ -79,9 +79,8 @@ def show(label: str, time: int, clock: int, node: int) -> None:
     print(f"  canonical v6   {v6_string(t, c, n)}")
     print(f"  binary wire    {wire.hex()}   ({len(wire)} bytes)")
     print(
-        f"     length byte 0x{wire[0]:02x} ({wire[0]})   <- first byte, nonzero => base59-safe"
+        f"     first byte  0x{wire[0]:02x} ({wire[0]})   <- top byte of the VL-folded value, nonzero => base59-safe"
     )
-    print(f"     payload     {wire[1:].hex()}")
     print(f"  '~' base59     {tilde}")
     # base59 round-trips because the first byte is nonzero:
     assert b59.decode(tilde[1:]) == wire, "base59 round-trip failed"
