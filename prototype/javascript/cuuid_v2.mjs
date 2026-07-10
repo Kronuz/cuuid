@@ -103,6 +103,59 @@ function big16be(v) {
   return b;
 }
 
+// v1's length table (uuid.cc), lifted verbatim; folds the length into the top bits.
+const VL = [
+  [[0x1c, 0xfc], [0x1c, 0xfc]], [[0x18, 0xfc], [0x18, 0xfc]], [[0x14, 0xfc], [0x14, 0xfc]],
+  [[0x10, 0xfc], [0x10, 0xfc]], [[0x04, 0xfc], [0x40, 0xc0]], [[0x0a, 0xfe], [0xa0, 0xe0]],
+  [[0x08, 0xfe], [0x80, 0xe0]], [[0x02, 0xff], [0x20, 0xf0]], [[0x03, 0xff], [0x30, 0xf0]],
+  [[0x0c, 0xff], [0xc0, 0xf0]], [[0x0d, 0xff], [0xd0, 0xf0]], [[0x0e, 0xff], [0xe0, 0xf0]],
+  [[0x0f, 0xff], [0xf0, 0xf0]],
+];
+
+function putVl(v) {
+  const buf = new Uint8Array(17);
+  const b16 = big16be(v);
+  buf.set(b16, 1); // buf[1..16] = value big-endian; buf[0] = 0
+  const end = 13; // low 4 bytes always emitted (min length 4)
+  let ptr = 0;
+  for (;;) {
+    if (ptr === end) break;
+    ptr++;
+    if (buf[ptr] !== 0) break;
+  }
+  let length = end - ptr;
+  if (buf[ptr] & VL[length][0][1]) {
+    if (buf[ptr] & VL[length][1][1]) {
+      ptr--;
+      length++;
+      buf[ptr] |= VL[length][0][0];
+    } else {
+      buf[ptr] |= VL[length][1][0];
+    }
+  } else {
+    buf[ptr] |= VL[length][0][0];
+  }
+  return buf.slice(ptr, ptr + length + 4);
+}
+
+function getVl(wire) {
+  const lead = wire.length ? wire[0] : 0;
+  const q = lead & 0xf0 ? 1 : 0;
+  let i = 0;
+  for (; i < 13; i++) {
+    if (VL[i][q][0] === (lead & VL[i][q][1])) break;
+  }
+  const length = i + 4;
+  if (i === 13 || wire.length < length) throw new Error("v6: bad VL length");
+  const buf = new Uint8Array(17);
+  const start = 17 - length;
+  buf.set(wire.subarray(0, length), start);
+  buf[start] &= ~VL[i][q][1] & 0xff;
+  let v = 0n;
+  for (let k = 1; k < 17; k++) v = (v << 8n) | BigInt(buf[k]);
+  return v;
+}
+
 function encode(time, clock, node) {
   const salt = node & SALT_MASK;
   const v2ms = gregToV2ms(time);
@@ -113,20 +166,11 @@ function encode(time, clock, node) {
   } else {
     v = (v2ms << 63n) | ((clock & CLOCK_MASK) << 49n) | ((node & NODE_MASK) << 1n);
   }
-  const buf = big16be(v);
-  let start = 0;
-  while (start < 15 && buf[start] === 0) start++;
-  const body = buf.slice(start);
-  const out = new Uint8Array(1 + body.length);
-  out[0] = body.length;
-  out.set(body, 1);
-  return out;
+  return putVl(v);
 }
 
 function decode(wire) {
-  const length = wire[0];
-  let v = 0n;
-  for (let i = 0; i < length; i++) v = (v << 8n) | BigInt(wire[1 + i]);
+  const v = getVl(wire);
   if (v & 1n) {
     const salt = (v >> 1n) & SALT_MASK;
     const clock = (v >> 8n) & CLOCK_MASK;

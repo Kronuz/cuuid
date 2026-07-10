@@ -102,6 +102,67 @@ def to_v6_bytes(time: int, clock: int, node: int) -> bytes:
     return bytes(b)
 
 
+_VL = [
+    [(0x1C, 0xFC), (0x1C, 0xFC)],
+    [(0x18, 0xFC), (0x18, 0xFC)],
+    [(0x14, 0xFC), (0x14, 0xFC)],
+    [(0x10, 0xFC), (0x10, 0xFC)],
+    [(0x04, 0xFC), (0x40, 0xC0)],
+    [(0x0A, 0xFE), (0xA0, 0xE0)],
+    [(0x08, 0xFE), (0x80, 0xE0)],
+    [(0x02, 0xFF), (0x20, 0xF0)],
+    [(0x03, 0xFF), (0x30, 0xF0)],
+    [(0x0C, 0xFF), (0xC0, 0xF0)],
+    [(0x0D, 0xFF), (0xD0, 0xF0)],
+    [(0x0E, 0xFF), (0xE0, 0xF0)],
+    [(0x0F, 0xFF), (0xF0, 0xF0)],
+]  # v1's length table (uuid.cc), lifted verbatim; folds the length into the top bits.
+
+
+def put_vl(v: int) -> bytes:
+    buf = bytearray(17)
+    for i in range(8):
+        buf[1 + i] = (v >> ((15 - i) * 8)) & 0xFF  # hi 8 bytes
+        buf[9 + i] = (v >> ((7 - i) * 8)) & 0xFF  # lo 8 bytes
+    end = 13  # low 4 bytes always emitted (min length 4)
+    ptr = 0
+    while True:
+        if ptr == end:
+            break
+        ptr += 1
+        if buf[ptr] != 0:
+            break
+    length = end - ptr
+    if buf[ptr] & _VL[length][0][1]:
+        if buf[ptr] & _VL[length][1][1]:
+            ptr -= 1
+            length += 1
+            buf[ptr] |= _VL[length][0][0]
+        else:
+            buf[ptr] |= _VL[length][1][0]
+    else:
+        buf[ptr] |= _VL[length][0][0]
+    return bytes(buf[ptr : ptr + length + 4])
+
+
+def get_vl(wire: bytes) -> int:
+    lead = wire[0] if wire else 0
+    q = 1 if (lead & 0xF0) else 0
+    i = 0
+    while i < 13:
+        if _VL[i][q][0] == (lead & _VL[i][q][1]):
+            break
+        i += 1
+    length = i + 4
+    if i == 13 or len(wire) < length:
+        raise ValueError("v6: bad VL length")
+    buf = bytearray(17)
+    start = 17 - length
+    buf[start : start + length] = wire[:length]
+    buf[start] &= (~_VL[i][q][1]) & 0xFF
+    return int.from_bytes(bytes(buf[1:17]), "big")
+
+
 def encode(time: int, clock: int, node: int) -> bytes:
     salt = node & SALT_MASK
     v2ms = greg_to_v2ms(time)
@@ -110,17 +171,11 @@ def encode(time: int, clock: int, node: int) -> bytes:
         v = (v2ms << 22) | ((clock & CLOCK_MASK) << 8) | (salt << 1) | 1
     else:
         v = (v2ms << 63) | ((clock & CLOCK_MASK) << 49) | ((node & NODE_MASK) << 1)
-    buf = v.to_bytes(16, "big")
-    start = 0
-    while start < 15 and buf[start] == 0:
-        start += 1
-    body = buf[start:]
-    return bytes([len(body)]) + body
+    return put_vl(v)
 
 
 def decode(wire: bytes) -> tuple[int, int, int]:
-    length = wire[0]
-    v = int.from_bytes(wire[1 : 1 + length], "big")
+    v = get_vl(wire)
     if v & 1:  # compact
         salt = (v >> 1) & SALT_MASK
         clock = (v >> 8) & CLOCK_MASK

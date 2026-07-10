@@ -191,19 +191,19 @@ int main(int argc, char** argv) {
 			uint64_t n = 0x020000000000ULL | (rng() & 0xffffffffffULL);
 			Id comp{t, c, n};
 			cuuid_v2::crush(comp);
-			std::string wc = cuuid_v2::encode_vl(comp);
-			if (!(cuuid_v2::decode_vl(wc) == comp)) ++fail_c;
+			std::string wc = cuuid_v2::encode(comp);
+			if (!(cuuid_v2::decode(wc) == comp)) ++fail_c;
 			csize += wc.size();
 			Id exp{t, c, n};
-			std::string we = cuuid_v2::encode_vl(exp);
-			if (!(cuuid_v2::decode_vl(we) == exp)) ++fail_e;
+			std::string we = cuuid_v2::encode(exp);
+			if (!(cuuid_v2::decode(we) == exp)) ++fail_e;
 			esize += we.size();
 		}
 		// sortability: strictly increasing time -> VL wire must sort
 		for (std::size_t i = 0; i < 50000; ++i) {
 			Id id{now_greg + i * 500000ULL, static_cast<uint16_t>(i & 0x3fff), 0};
 			cuuid_v2::crush(id);
-			sorted_run.push_back(cuuid_v2::encode_vl(id));
+			sorted_run.push_back(cuuid_v2::encode(id));
 		}
 		std::printf("1b. VL-folded wire (final format): compact fails=%zu, expanded fails=%zu  %s\n",
 		            fail_c, fail_e, (fail_c == 0 && fail_e == 0) ? "[OK]" : "[FAIL]");

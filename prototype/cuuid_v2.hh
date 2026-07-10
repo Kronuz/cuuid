@@ -219,80 +219,13 @@ inline void get_vl(std::string_view wire, uint64_t& hi, uint64_t& lo) {
 	for (int k = 9; k < 17; ++k) lo = (lo << 8) | buf[k];
 }
 
-// v6 encode/decode with VL-folded framing (final wire: 8 bytes compact, no length byte).
-inline std::string encode_vl(const Id& id) {
-	std::string out;
-	uint8_t salt = static_cast<uint8_t>(id.node & SALT_MASK);
-	uint64_t v2ms = greg_to_v2ms(id.time);
-	bool compact = (id.node == reconstruct_node(v2ms, id.clock, salt));
-	__uint128_t v;
-	if (compact) {
-		v = (static_cast<__uint128_t>(v2ms) << 22) | (static_cast<__uint128_t>(id.clock & CLOCK_MASK) << 8) |
-		    (static_cast<__uint128_t>(salt) << 1) | 1u;
-	} else {
-		v = (static_cast<__uint128_t>(v2ms) << 63) | (static_cast<__uint128_t>(id.clock & CLOCK_MASK) << 49) |
-		    (static_cast<__uint128_t>(id.node & NODE_MASK) << 1);
-	}
-	put_vl(out, static_cast<uint64_t>(v >> 64), static_cast<uint64_t>(v));
-	return out;
-}
-
-inline Id decode_vl(std::string_view wire) {
-	uint64_t hi, lo;
-	get_vl(wire, hi, lo);
-	__uint128_t v = (static_cast<__uint128_t>(hi) << 64) | lo;
-	Id id;
-	bool compact = (static_cast<uint64_t>(v) & 1u) != 0;
-	if (compact) {
-		uint8_t salt = static_cast<uint8_t>((v >> 1) & SALT_MASK);
-		uint64_t clk = static_cast<uint64_t>((v >> 8) & CLOCK_MASK);
-		uint64_t v2ms = static_cast<uint64_t>(v >> 22);
-		id.clock = static_cast<uint16_t>(clk);
-		id.time = v2ms_to_greg(v2ms);
-		id.node = reconstruct_node(v2ms, id.clock, salt);
-	} else {
-		uint64_t node = static_cast<uint64_t>((v >> 1) & NODE_MASK);
-		uint64_t clk = static_cast<uint64_t>((v >> 49) & CLOCK_MASK);
-		uint64_t v2ms = static_cast<uint64_t>(v >> 63);
-		id.clock = static_cast<uint16_t>(clk);
-		id.node = node;
-		id.time = v2ms_to_greg(v2ms);
-	}
-	return id;
-}
-
-// Order-preserving variable-length big-endian: strip leading zero bytes, then
-// prefix one length byte. [len][minimal big-endian] sorts lexicographically by
-// value because a larger value never has fewer bytes.
-inline void put_varlen(std::string& out, uint64_t hi, uint64_t lo) {
-	uint8_t buf[16];
-	for (int i = 0; i < 8; ++i) buf[i] = static_cast<uint8_t>(hi >> ((7 - i) * 8));
-	for (int i = 0; i < 8; ++i) buf[8 + i] = static_cast<uint8_t>(lo >> ((7 - i) * 8));
-	int start = 0;
-	while (start < 15 && buf[start] == 0) ++start; // keep at least one byte
-	int len = 16 - start;
-	out.push_back(static_cast<char>(len));
-	out.append(reinterpret_cast<const char*>(buf + start), len);
-}
-
-inline void get_varlen(const uint8_t*& p, const uint8_t* end, uint64_t& hi, uint64_t& lo) {
-	if (p >= end) throw std::runtime_error("v2: truncated");
-	int len = *p++;
-	if (len < 1 || len > 16 || p + len > end) throw std::runtime_error("v2: bad length");
-	uint8_t buf[16] = {0};
-	std::memcpy(buf + (16 - len), p, len);
-	p += len;
-	hi = lo = 0;
-	for (int i = 0; i < 8; ++i) hi = (hi << 8) | buf[i];
-	for (int i = 0; i < 8; ++i) lo = (lo << 8) | buf[8 + i];
-}
-
-// ---- condensed v2 wire ----
+// ---- condensed v6 wire ----
 // Layout, MSB-first inside a 128-bit value so it sorts by time:
 //   compact:  [ v2ms ][ clock : 14 ][ salt : 7 ][ compacted=1 : 1 ]
 //   expanded: [ v2ms ][ clock : 14 ][ node : 48 ][ compacted=0 : 1 ]
-// v2ms (ms since 2026) is variable width; leading zero bytes are stripped. No XOR fold:
-// the timestamp is already ms-coarse, so sort granularity is 1ms with a clock tie-break.
+// v2ms (ms since 2026) is variable width; the length is folded into the top bits by put_vl
+// (no separate length byte -> 8-byte compact wire, matching v1). No XOR fold: the timestamp
+// is already ms-coarse, so sort granularity is 1ms with a clock tie-break.
 inline std::string encode(const Id& id) {
 	std::string out;
 
@@ -310,15 +243,13 @@ inline std::string encode(const Id& id) {
 		    (static_cast<__uint128_t>(id.clock & CLOCK_MASK) << 49) |
 		    (static_cast<__uint128_t>(id.node & NODE_MASK) << 1) | 0u;
 	}
-	put_varlen(out, static_cast<uint64_t>(v >> 64), static_cast<uint64_t>(v));
-	return out; // [length][payload]; first byte is the nonzero length, so base59-safe
+	put_vl(out, static_cast<uint64_t>(v >> 64), static_cast<uint64_t>(v));
+	return out; // VL-folded: 8-byte compact wire, nonzero first byte (base59-safe), sortable
 }
 
 inline Id decode(std::string_view wire) {
-	const uint8_t* p = reinterpret_cast<const uint8_t*>(wire.data());
-	const uint8_t* end = p + wire.size();
 	uint64_t hi, lo;
-	get_varlen(p, end, hi, lo);
+	get_vl(wire, hi, lo);
 	__uint128_t v = (static_cast<__uint128_t>(hi) << 64) | lo;
 
 	Id id;
