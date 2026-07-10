@@ -43,7 +43,10 @@ constexpr uint64_t NODE_MASK  = (1ULL << NODE_BITS) - 1;
 constexpr uint64_t SALT_MASK  = (1ULL << SALT_BITS) - 1;
 constexpr uint64_t MULTICAST  = 0x010000000000ULL;
 
-constexpr uint8_t  V2_TAG = 0x02; // distinct from v1 full (0x01); v1 reader rejects it
+constexpr uint8_t  V2_TAG = 0x00; // the one byte no v1 wire can start with: v1 full is 0x01,
+                                  // and v1 condensed strips leading zeros so byte0 is always
+                                  // nonzero. So an old v1 reader rejects v2, and a dispatcher
+                                  // never misreads a v1 id as v2. (0x02 is a VL prefix -- unsafe.)
 
 // Gregorian 100ns  <->  v2 ms-since-2026 (the wire's time unit).
 inline uint64_t greg_to_v2ms(uint64_t greg) {

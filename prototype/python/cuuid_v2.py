@@ -23,7 +23,7 @@ CLOCK_MASK = (1 << CLOCK_BITS) - 1
 NODE_MASK = (1 << NODE_BITS) - 1
 SALT_MASK = (1 << SALT_BITS) - 1
 MULTICAST = 0x010000000000
-V2_TAG = 0x02
+V2_TAG = 0x00  # the one byte no v1 wire can start with (full is 0x01; condensed strips to nonzero)
 
 
 def splitmix64(x: int) -> int:

@@ -130,7 +130,7 @@ This is orthogonal to size: v6 is still 16 bytes canonical. The appealing combin
 
 ## Prototype: a working v2
 
-I built that v2 as a standalone prototype (`prototype/cuuid_v2.hh` and `prototype/v2_demo.cc`) to check the design end to end. It does not touch the frozen `uuid.hh` / `uuid.cc`; it stores as UUIDv6, reconstructs the compacted node with splitmix64, stores the timestamp as milliseconds since a 2026 epoch, keeps the variable-length wire, and carries a distinct tag byte (`0x02`) so the current decoder rejects it. Measured (`./build/cuuid_v2_demo`, same machine):
+I built that v2 as a standalone prototype (`prototype/cuuid_v2.hh` and `prototype/v2_demo.cc`) to check the design end to end. It does not touch the frozen `uuid.hh` / `uuid.cc`; it stores as UUIDv6, reconstructs the compacted node with splitmix64, stores the timestamp as milliseconds since a 2026 epoch, keeps the variable-length wire, and carries a distinct tag byte (`0x00`) so old readers reject it and old ids never look like v2 (see "Backward compatibility" below). Measured (`./build/cuuid_v2_demo`, same machine):
 
 | | v2 prototype | v1 (current) |
 |---|---|---|
@@ -144,7 +144,23 @@ I built that v2 as a standalone prototype (`prototype/cuuid_v2.hh` and `prototyp
 - **Correctness.** 200k random ids round-trip with zero failures in both compact and expanded modes, and through the canonical v6 form.
 - **Speed.** The Mersenne Twister is gone; encode and decode drop by ~70x and ~100x. This is the whole-codec number, not just the mixer in isolation.
 - **Sortability.** Both the condensed wire and the raw v6 bytes sort by creation time. The second one is the real gain: a consumer can index the canonical bytes directly, no codec on the read path at all.
-- **Coexistence.** The real cuuid decoder throws on the `0x02` tag (its dispatch is "byte 0 == 1 means full, else condensed", and `0x02` matches no condensed prefix), and a five-line dispatcher routes v1 and v2 ids from the same reader. Old data keeps decoding.
+- **Coexistence.** Old and new ids live in one store, routed by the first byte (see below). Old data keeps decoding.
+
+### Backward compatibility: feeding old v1 ids to v2
+
+The important question for any format change: what happens to the ids already on disk? Xapiand stores them as the `~`-prefixed text form of these exact wire bytes, so a v2 reader will be handed old v1 wires constantly, and it must never silently misread one.
+
+The tag choice is what makes this safe, and it is not free. The obvious pick, `0x02`, is a trap: `0x02` is a real entry in v1's length-prefix table (the length-11 code), so in principle a v1 condensed wire could begin with it, and a dispatcher would then route an old id into the v2 decoder and hand back garbage. The safe pick is **`0x00`**, because it is the one byte no v1 wire can ever start with: the full form is always `0x01`, and the condensed form strips leading zero bytes so its first byte is always nonzero (every prefix is OR-ed into a nonzero byte). So `0x00` cannot collide, by construction, not by luck.
+
+The prototype proves it against the real library. It generates 720,000 v1 wires (compact and expanded, times spanning decades so every encoded length occurs) and feeds each one to the v2 decoder and to a first-byte dispatcher:
+
+```text
+V2_TAG=0x00 appears as a v1 first byte: compact=no expanded=no
+v1 wires the v2 decoder wrongly accepted: 0 [OK, all rejected]
+v1 wires the dispatcher routed correctly to v1: 720000 / 720000 [OK]
+```
+
+So the answer is: a v2 decoder handed an old v1 id **rejects it cleanly** (throws, never a silent misread), and the real deployment is a five-line dispatcher, "first byte `0x00` means v2, `0x01` means v1-full, anything else means v1-condensed", which routes every id to the right decoder. It also works the other way: an old v1 reader handed a v2 wire sees a `0x00` first byte, finds no matching condensed prefix, and throws, so old code refuses new ids instead of mangling them. Both directions fail loud, which is exactly what you want from a format bump. (Reproduce with `./build/cuuid_v2_demo --compat`.)
 
 ### The time encoding
 

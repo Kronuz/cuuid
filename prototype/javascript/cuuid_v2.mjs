@@ -17,7 +17,7 @@ const CLOCK_MASK = (1n << 14n) - 1n;
 const NODE_MASK = (1n << 48n) - 1n;
 const SALT_MASK = (1n << 7n) - 1n;
 const MULTICAST = 0x010000000000n;
-const V2_TAG = 0x02;
+const V2_TAG = 0x00; // the one byte no v1 wire can start with (full is 0x01; condensed strips to nonzero)
 
 function splitmix64(x) {
   x = (x + 0x9e3779b97f4a7c15n) & MASK64;

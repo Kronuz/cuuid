@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <random>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -80,6 +81,65 @@ int main(int argc, char** argv) {
 				emit("expanded", cuuid_v2::Id{greg, clock, 0x02aabbccddeeULL});
 			}
 		}
+		return 0;
+	}
+
+	// --compat: feed a wide variety of REAL v1 wires to the v2 decoder and check what happens.
+	// The danger is a v1 wire whose first byte equals V2_TAG: a dispatcher would misroute it.
+	if (argc > 1 && std::string(argv[1]) == "--compat") {
+		std::set<int> fb_compact, fb_expanded;
+		std::size_t v2_misreads = 0, dispatched_ok = 0, total = 0;
+		uint64_t yr = 315569520000ULL; // ~1y in ms
+		std::mt19937_64 r(0xD00D);
+		for (uint64_t ymul = 0; ymul < 90; ++ymul) {
+			for (int rep = 0; rep < 4000; ++rep) {
+				uint64_t ms = (ymul * yr) + (r() % yr);
+				uint64_t greg = cuuid_v2::GREG_EPOCH_100NS + ms * 10000ULL;
+				uint16_t clk = static_cast<uint16_t>(r() & 0x3fff);
+				UUID base = make_v1(greg, clk, 0x010000000000ULL | (r() & 0xffffffffffULL));
+
+				UUID uc = base; uc.compact_crush();
+				std::string wc = uc.serialise();
+				UUID ue = make_v1(greg, clk, 0x020000000000ULL | (r() & 0xffffffffffULL));
+				std::string we = ue.serialise();
+
+				for (const std::string* w : {&wc, &we}) {
+					int b0 = static_cast<uint8_t>((*w)[0]);
+					(w == &wc ? fb_compact : fb_expanded).insert(b0);
+					++total;
+					// Feed the v1 wire to the v2 decoder: it must REJECT (throw), never silently accept.
+					try { cuuid_v2::decode(*w); ++v2_misreads; } catch (...) {}
+					// A dispatcher (v2 tag -> v2, else -> v1) must still route it to the v1 decoder.
+					try {
+						if (b0 == cuuid_v2::V2_TAG) cuuid_v2::decode(*w);
+						else UUID::unserialise(*w);
+						++dispatched_ok;
+					} catch (...) {}
+				}
+			}
+		}
+		auto dump = [](const char* n, const std::set<int>& s) {
+			std::printf("   %s first bytes (%zu distinct): ", n, s.size());
+			for (int b : s) std::printf("%02x ", b);
+			std::printf("\n");
+		};
+		std::printf("== v1 -> v2 compatibility probe (%zu v1 wires) ==\n", total);
+		dump("compact ", fb_compact);
+		dump("expanded", fb_expanded);
+		bool has02c = fb_compact.count(cuuid_v2::V2_TAG), has02e = fb_expanded.count(cuuid_v2::V2_TAG);
+		std::printf("   V2_TAG=0x%02x appears as a v1 first byte: compact=%s expanded=%s\n",
+		            cuuid_v2::V2_TAG, has02c ? "YES" : "no", has02e ? "YES" : "no");
+		std::printf("   v1 wires the v2 decoder wrongly accepted: %zu %s\n",
+		            v2_misreads, v2_misreads ? "[SILENT CORRUPTION -- unsafe tag]" : "[OK, all rejected]");
+		std::printf("   v1 wires the dispatcher routed correctly to v1: %zu / %zu %s\n",
+		            dispatched_ok, total, dispatched_ok == total ? "[OK]" : "[!!]");
+		// which byte values are NEVER used by v1 (safe tag candidates)?
+		std::printf("   bytes never used by any v1 wire (safe V2_TAG candidates): ");
+		std::set<int> all = fb_compact; all.insert(fb_expanded.begin(), fb_expanded.end());
+		all.insert(0x01); // full form
+		int shown = 0;
+		for (int b = 0; b < 256 && shown < 16; ++b) if (!all.count(b)) { std::printf("%02x ", b); ++shown; }
+		std::printf("...\n");
 		return 0;
 	}
 
