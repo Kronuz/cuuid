@@ -26,16 +26,18 @@
 
 namespace cuuid_v2 {
 
-// --- time base, mirrored from uuid.cc so sizes are comparable ---
-constexpr uint64_t UUID_TIME_EPOCH   = 0x01b21dd213814000ULL;               // Gregorian .. Unix, in 100ns
-constexpr uint64_t UUID_TIME_YEAR    = 0x00011f0241243c00ULL;
-constexpr uint64_t UUID_TIME_INITIAL = UUID_TIME_EPOCH + (2016 - 1970) * UUID_TIME_YEAR; // 2016 rebase
+// --- time base ---
+// The compact wire stores the timestamp as MILLISECONDS since a 2026 epoch, not the
+// 100ns Gregorian ticks v1 uses. The path already quantizes to ~1.64ms, so 100ns
+// resolution was ~2 bytes of dead precision; ms + a 2026 rebase makes present-day ids
+// several bytes smaller (see COMPARISON.md). The canonical v6 form still carries a full
+// Gregorian timestamp (with sub-ms digits zeroed), so it stays RFC-valid and sortable.
+constexpr uint64_t GREG_EPOCH_100NS = 0x01b21dd213814000ULL; // 1582-10-15 .. 1970, in 100ns
+constexpr uint64_t EPOCH_2026_MS    = 1767225600000ULL;      // 2026-01-01T00:00:00Z, unix ms
 
-constexpr uint8_t  TIME_BITS  = 60;
 constexpr uint8_t  CLOCK_BITS = 14;
 constexpr uint8_t  NODE_BITS  = 48;
 constexpr uint8_t  SALT_BITS  = 7;
-constexpr uint64_t TIME_MASK  = (1ULL << TIME_BITS) - 1;
 constexpr uint64_t CLOCK_MASK = (1ULL << CLOCK_BITS) - 1;
 constexpr uint64_t NODE_MASK  = (1ULL << NODE_BITS) - 1;
 constexpr uint64_t SALT_MASK  = (1ULL << SALT_BITS) - 1;
@@ -43,7 +45,20 @@ constexpr uint64_t MULTICAST  = 0x010000000000ULL;
 
 constexpr uint8_t  V2_TAG = 0x02; // distinct from v1 full (0x01); v1 reader rejects it
 
-// splitmix64: the cheap, deterministic mixer that replaces std::mt19937.
+// Gregorian 100ns  <->  v2 ms-since-2026 (the wire's time unit).
+inline uint64_t greg_to_v2ms(uint64_t greg) {
+	uint64_t unix_ms = (greg - GREG_EPOCH_100NS) / 10000ULL;
+	return unix_ms - EPOCH_2026_MS; // callers use times >= 2026
+}
+inline uint64_t v2ms_to_greg(uint64_t v2ms) {
+	uint64_t unix_ms = v2ms + EPOCH_2026_MS;
+	return unix_ms * 10000ULL + GREG_EPOCH_100NS;
+}
+
+// splitmix64: the cheap, deterministic mixer that replaces std::mt19937. Pure fixed-width
+// integer arithmetic, so it produces identical bytes in C++, Python, and JavaScript with
+// no floating point and no platform RNG. That portability is exactly what forced the old
+// design to embed a hand-rolled Mersenne Twister in each port.
 inline uint64_t splitmix64(uint64_t x) {
 	x += 0x9e3779b97f4a7c15ULL;
 	x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
@@ -62,10 +77,10 @@ struct Id {
 	}
 };
 
-// Reconstruct the synthetic node of a compacted id from (time, clock, salt).
-// Deterministic, carries the salt in the low 7 bits, sets the multicast bit.
-inline uint64_t reconstruct_node(uint64_t time, uint16_t clock, uint8_t salt) {
-	uint64_t seed = splitmix64(time ^ (static_cast<uint64_t>(clock) << 48) ^ (static_cast<uint64_t>(salt) << 56));
+// Reconstruct the synthetic node of a compacted id from the wire-native fields
+// (ms-since-2026, clock, salt). Deterministic; carries the salt, sets the multicast bit.
+inline uint64_t reconstruct_node(uint64_t v2ms, uint16_t clock, uint8_t salt) {
+	uint64_t seed = splitmix64(v2ms ^ (static_cast<uint64_t>(clock) << 44) ^ (static_cast<uint64_t>(salt) << 57));
 	uint64_t node = splitmix64(seed);
 	node &= NODE_MASK & ~SALT_MASK;
 	node |= salt;
@@ -73,19 +88,14 @@ inline uint64_t reconstruct_node(uint64_t time, uint16_t clock, uint8_t salt) {
 	return node;
 }
 
-// Make an id's node synthetic AND normalize it to its stored form (the v2 equivalent
-// of compact_crush). Like v1, the compact path is lossy on the low CLOCK_BITS of the
-// timestamp: they are folded into the clock field here, so after crush the id already
-// equals what a compact encode/decode round-trip yields. Assumes time >= UUID_TIME_INITIAL
-// (a prototype simplification; the real code special-cases time == 0).
+// Make an id's node synthetic AND normalize its timestamp to ms granularity (the v2
+// equivalent of compact_crush). After this, a compact encode/decode round-trips exactly.
+// Assumes time >= the 2026 epoch (a prototype simplification; production guards earlier ids).
 inline void crush(Id& id) {
 	uint8_t salt = static_cast<uint8_t>(id.node & SALT_MASK);
-	uint64_t rebased = (id.time - UUID_TIME_INITIAL) & TIME_MASK;
-	uint64_t low14   = rebased & CLOCK_MASK;
-	uint64_t t46     = rebased >> CLOCK_BITS;
-	id.clock = static_cast<uint16_t>((id.clock ^ low14) & CLOCK_MASK); // fold low time bits into clock
-	id.time  = ((t46 << CLOCK_BITS) + UUID_TIME_INITIAL) & TIME_MASK;  // low bits zeroed
-	id.node  = reconstruct_node(id.time, id.clock, salt);
+	uint64_t v2ms = greg_to_v2ms(id.time);
+	id.time = v2ms_to_greg(v2ms);                 // sub-ms digits zeroed
+	id.node = reconstruct_node(v2ms, id.clock, salt);
 }
 
 // ---- canonical UUIDv6 (RFC 9562): 16 raw bytes that sort by time ----
@@ -149,26 +159,25 @@ inline void get_varlen(const uint8_t*& p, const uint8_t* end, uint64_t& hi, uint
 
 // ---- condensed v2 wire ----
 // Layout, MSB-first inside a 128-bit value so it sorts by time:
-//   compact:  [ rebased_time>>CLOCK : 46 ][ clock^low : 14 ][ salt : 7 ][ compacted=1 : 1 ]
-//   expanded: [ rebased_time        : 60 ][ clock      : 14 ][ node : 48 ][ compacted=0 : 1 ]
-// Same folding trick v1 uses to reach ~8 bytes; canonical v6 keeps full resolution regardless.
+//   compact:  [ v2ms ][ clock : 14 ][ salt : 7 ][ compacted=1 : 1 ]
+//   expanded: [ v2ms ][ clock : 14 ][ node : 48 ][ compacted=0 : 1 ]
+// v2ms (ms since 2026) is variable width; leading zero bytes are stripped. No XOR fold:
+// the timestamp is already ms-coarse, so sort granularity is 1ms with a clock tie-break.
 inline std::string encode(const Id& id) {
 	std::string out;
 	out.push_back(static_cast<char>(V2_TAG));
 
 	uint8_t salt = static_cast<uint8_t>(id.node & SALT_MASK);
-	bool compact = (id.node == reconstruct_node(id.time, id.clock, salt));
-
-	uint64_t rebased = (id.time - UUID_TIME_INITIAL) & TIME_MASK;
+	uint64_t v2ms = greg_to_v2ms(id.time);
+	bool compact = (id.node == reconstruct_node(v2ms, id.clock, salt));
 
 	__uint128_t v = 0;
 	if (compact) {
-		uint64_t t46 = rebased >> CLOCK_BITS; // low CLOCK_BITS are already 0 after crush
-		v = (static_cast<__uint128_t>(t46) << 22) |
+		v = (static_cast<__uint128_t>(v2ms) << 22) |
 		    (static_cast<__uint128_t>(id.clock & CLOCK_MASK) << 8) |
 		    (static_cast<__uint128_t>(salt) << 1) | 1u;
 	} else {
-		v = (static_cast<__uint128_t>(rebased) << 63) |
+		v = (static_cast<__uint128_t>(v2ms) << 63) |
 		    (static_cast<__uint128_t>(id.clock & CLOCK_MASK) << 49) |
 		    (static_cast<__uint128_t>(id.node & NODE_MASK) << 1) | 0u;
 	}
@@ -188,19 +197,19 @@ inline Id decode(std::string_view wire) {
 	Id id;
 	bool compact = (static_cast<uint64_t>(v) & 1u) != 0;
 	if (compact) {
-		uint8_t salt = static_cast<uint8_t>((v >> 1) & SALT_MASK);
-		uint64_t clk = static_cast<uint64_t>((v >> 8) & CLOCK_MASK);
-		uint64_t t46 = static_cast<uint64_t>(v >> 22);
+		uint8_t salt  = static_cast<uint8_t>((v >> 1) & SALT_MASK);
+		uint64_t clk  = static_cast<uint64_t>((v >> 8) & CLOCK_MASK);
+		uint64_t v2ms = static_cast<uint64_t>(v >> 22);
 		id.clock = static_cast<uint16_t>(clk);
-		id.time  = ((t46 << CLOCK_BITS) + UUID_TIME_INITIAL) & TIME_MASK;
-		id.node  = reconstruct_node(id.time, id.clock, salt);
+		id.time  = v2ms_to_greg(v2ms);
+		id.node  = reconstruct_node(v2ms, id.clock, salt);
 	} else {
-		uint64_t node    = static_cast<uint64_t>((v >> 1) & NODE_MASK);
-		uint64_t clk     = static_cast<uint64_t>((v >> 49) & CLOCK_MASK);
-		uint64_t rebased = static_cast<uint64_t>(v >> 63) & TIME_MASK;
+		uint64_t node = static_cast<uint64_t>((v >> 1) & NODE_MASK);
+		uint64_t clk  = static_cast<uint64_t>((v >> 49) & CLOCK_MASK);
+		uint64_t v2ms = static_cast<uint64_t>(v >> 63);
 		id.clock = static_cast<uint16_t>(clk);
 		id.node  = node;
-		id.time  = (rebased + UUID_TIME_INITIAL) & TIME_MASK;
+		id.time  = v2ms_to_greg(v2ms);
 	}
 	return id;
 }

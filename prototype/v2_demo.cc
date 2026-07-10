@@ -44,12 +44,44 @@ static UUID make_v1(uint64_t greg_time, uint16_t clock, uint64_t node) {
 	return u;
 }
 
-int main() {
+int main(int argc, char** argv) {
 	std::mt19937_64 rng(0xBEEF);
 	uint64_t now_ms = static_cast<uint64_t>(
 		std::chrono::duration_cast<std::chrono::milliseconds>(
 			std::chrono::system_clock::now().time_since_epoch()).count());
-	uint64_t now_greg = cuuid_v2::UUID_TIME_EPOCH + now_ms * 10000ULL;
+	uint64_t now_greg = cuuid_v2::GREG_EPOCH_100NS + now_ms * 10000ULL;
+
+	// --vectors: emit cross-language test vectors (the Python/JS ports validate against these).
+	// Each line: mode<TAB>time<TAB>clock<TAB>node<TAB>wire_hex<TAB>v6_hex
+	// where (time,clock,node) are the final fields (post-crush for compact).
+	if (argc > 1 && std::string(argv[1]) == "--vectors") {
+		auto hex = [](const std::string& s) {
+			static const char* H = "0123456789abcdef";
+			std::string o;
+			for (unsigned char c : s) { o.push_back(H[c >> 4]); o.push_back(H[c & 0xf]); }
+			return o;
+		};
+		auto emit = [&](const char* mode, cuuid_v2::Id id) {
+			std::string w = cuuid_v2::encode(id);
+			auto b = cuuid_v2::to_v6_bytes(id);
+			std::string v6(reinterpret_cast<const char*>(b.data()), 16);
+			std::printf("%s\t%llu\t%u\t%llu\t%s\t%s\n", mode,
+			            static_cast<unsigned long long>(id.time), id.clock,
+			            static_cast<unsigned long long>(id.node), hex(w).c_str(), hex(v6).c_str());
+		};
+		uint64_t yr_ms = 31556952000ULL;
+		for (uint64_t years : {0ULL, 1ULL, 4ULL, 9ULL, 24ULL, 74ULL}) {
+			uint64_t ms = cuuid_v2::EPOCH_2026_MS + years * yr_ms + 123456ULL;
+			uint64_t greg = cuuid_v2::GREG_EPOCH_100NS + ms * 10000ULL;
+			for (uint16_t clock : {uint16_t(0), uint16_t(1), uint16_t(0x2abc & 0x3fff)}) {
+				cuuid_v2::Id c{greg, clock, 0x123456789aULL};
+				cuuid_v2::crush(c);
+				emit("compact", c);
+				emit("expanded", cuuid_v2::Id{greg, clock, 0x02aabbccddeeULL});
+			}
+		}
+		return 0;
+	}
 
 	std::printf("== cuuid v2 prototype ==\n\n");
 
@@ -58,7 +90,7 @@ int main() {
 		constexpr std::size_t N = 200000;
 		std::size_t fail_c = 0, fail_e = 0;
 		for (std::size_t i = 0; i < N; ++i) {
-			uint64_t t = now_greg + (rng() % 3155695200000000ULL); // random within ~10y
+			uint64_t t = now_greg + (rng() % 315569520000ULL) * 10000ULL; // random ms within ~10y, ms-aligned
 			uint16_t c = static_cast<uint16_t>(rng() & 0x3fff);
 			uint64_t n = 0x020000000000ULL | (rng() & 0xffffffffffULL);
 
@@ -145,9 +177,21 @@ int main() {
 		            static_cast<double>(c_total) / M, static_cast<double>(c_total) / M - 2);
 		std::printf("   v2 expanded total      %.2f  = 1 tag + 1 length + %.2f payload\n",
 		            static_cast<double>(e_total) / M, static_cast<double>(e_total) / M - 2);
-		std::printf("   v1 compact total       %.2f  (VL table folds length into the top bits; no tag)\n",
+		std::printf("   v1 compact total       %.2f  (100ns/2016; VL folds length, no tag)\n",
 		            static_cast<double>(v1c_total) / M);
-		std::printf("   note: v2 payload matches v1; the 2-byte framing is reclaimable (fold length, 1-bit flag)\n\n");
+		std::printf("   v2 compact PAYLOAD vs year (ms/2026 shrinks the time field ~2 bytes vs 100ns):\n");
+		uint64_t yr_ms = 31556952000ULL;
+		for (uint64_t years : {0ULL, 1ULL, 4ULL, 9ULL, 24ULL, 74ULL}) {
+			uint64_t ms = cuuid_v2::EPOCH_2026_MS + years * yr_ms + 500ULL;
+			uint64_t greg = cuuid_v2::GREG_EPOCH_100NS + ms * 10000ULL;
+			Id id{greg, 0x1abc, 0x33ULL};
+			cuuid_v2::crush(id);
+			std::printf("      %4llu (year %llu)  payload %zu bytes\n",
+			            static_cast<unsigned long long>(2026 + years),
+			            static_cast<unsigned long long>(years),
+			            cuuid_v2::encode(id).size() - 2);
+		}
+		std::printf("\n");
 	}
 
 	// ---------- 5. Coexistence ----------

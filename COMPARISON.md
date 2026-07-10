@@ -130,24 +130,45 @@ This is orthogonal to size: v6 is still 16 bytes canonical. The appealing combin
 
 ## Prototype: a working v2
 
-I built that v2 as a standalone prototype (`prototype/cuuid_v2.hh` and `prototype/v2_demo.cc`) to check the design end to end. It does not touch the frozen `uuid.hh` / `uuid.cc`; it stores as UUIDv6, reconstructs the compacted node with splitmix64, keeps the variable-length wire, and carries a distinct tag byte (`0x02`) so the current decoder rejects it. Measured (`./build/cuuid_v2_demo`, same machine):
+I built that v2 as a standalone prototype (`prototype/cuuid_v2.hh` and `prototype/v2_demo.cc`) to check the design end to end. It does not touch the frozen `uuid.hh` / `uuid.cc`; it stores as UUIDv6, reconstructs the compacted node with splitmix64, stores the timestamp as milliseconds since a 2026 epoch, keeps the variable-length wire, and carries a distinct tag byte (`0x02`) so the current decoder rejects it. Measured (`./build/cuuid_v2_demo`, same machine):
 
 | | v2 prototype | v1 (current) |
 |---|---|---|
-| encode | ~15 ns | ~950 ns |
-| decode | ~7 ns | ~950 ns |
-| compact payload | 8 bytes | 8 bytes |
-| compact wire total | 10 bytes (2-byte framing) | 8 bytes |
+| encode | ~12 ns | ~880 ns |
+| decode | ~8 ns | ~850 ns |
+| compact payload | 4 bytes (2026) to 8 bytes (steady) | 8 bytes |
+| compact wire total | payload + 2 framing | 8 bytes |
 | condensed wire sortable | yes (1.0000) | yes (1.0000) |
 | **canonical bytes sortable** | **yes (1.0000, v6)** | **no (v1)** |
 
 - **Correctness.** 200k random ids round-trip with zero failures in both compact and expanded modes, and through the canonical v6 form.
-- **Speed.** The Mersenne Twister is gone; encode and decode drop by ~65x and ~140x. This is the whole-codec number, not just the mixer in isolation.
+- **Speed.** The Mersenne Twister is gone; encode and decode drop by ~70x and ~100x. This is the whole-codec number, not just the mixer in isolation.
 - **Sortability.** Both the condensed wire and the raw v6 bytes sort by creation time. The second one is the real gain: a consumer can index the canonical bytes directly, no codec on the read path at all.
-- **Size.** The 8-byte payload matches v1. The prototype spends 2 extra bytes on framing (an explicit tag byte and an explicit length byte) purely for clarity; production reclaims both by folding the length into the top bits the way v1's VL table already does, and using a 1-bit format flag instead of a whole tag byte.
 - **Coexistence.** The real cuuid decoder throws on the `0x02` tag (its dispatch is "byte 0 == 1 means full, else condensed", and `0x02` matches no condensed prefix), and a five-line dispatcher routes v1 and v2 ids from the same reader. Old data keeps decoding.
 
-The prototype confirms the design is sound and cheap. The catch is not technical, it is scope: the wire format is a **three-language contract**. Xapiand ships reference implementations in [Python](https://github.com/Kronuz/Xapiand/tree/master/contrib/python/cuuid) and [JavaScript](https://github.com/Kronuz/Xapiand/tree/master/contrib/javascript/cuuid) alongside the C++, and the Python port literally includes `mertwis.py`, a hand-rolled Mersenne Twister that exists only to reconstruct compacted nodes byte-for-byte. A v2 is therefore three changes, not one, but it is a **simplifying** three: every port gets to delete its Mersenne Twister and replace it with a four-line splitmix64. That trade, three coordinated ports against a permanently cheaper and natively-sortable format, is the actual decision, and it is a good one whenever the format is next revised.
+### The time encoding
+
+The compact wire spends most of its bytes on the timestamp, so that is where size is won or lost. Two changes, both essentially free:
+
+- **Rebase the epoch to 2026.** The delta from the epoch is what gets stored, so a 2026 epoch makes present-day ids tiny: a compact id minted in 2026 has a **4-byte** payload, versus v1's 8. The delta grows over time (about 35 bits per year in ms), so the payload climbs back to 8 bytes within a year or two, but the near-term win is real and the epoch can be re-based again at the next format revision.
+- **Store milliseconds, not 100ns ticks.** v1 carries a 60-bit Gregorian 100ns timestamp and then folds away its low 14 bits with an XOR, which is really a clumsy way of quantizing to ~1.64ms. Storing plain milliseconds gets the same resolution (1ms) without the fold, which is why the v2 codec has no XOR and no clock-scrambling: cleaner to read, cleaner to port, and it gives a proper 1ms sort granularity with the clock as a tie-breaker instead of v1's scrambled 1.64ms floor. Honestly, v1's fold already approximated milliseconds, so the steady-state payload is the same 8 bytes; the ms form's gain is that it stays flat at 8 out to 2100 (v1 creeps to 9) and, mostly, that it is far simpler.
+
+The canonical form stays a full RFC-valid UUIDv6 (the sub-millisecond digits are just zero), so it still sorts at millisecond resolution.
+
+### The ports, and why they get simpler
+
+The wire format is a **three-language contract**. Xapiand ships reference implementations in [Python](https://github.com/Kronuz/Xapiand/tree/master/contrib/python/cuuid) and [JavaScript](https://github.com/Kronuz/Xapiand/tree/master/contrib/javascript/cuuid) alongside the C++, and the Python port literally includes `mertwis.py`, a hand-rolled Mersenne Twister. It exists for one reason: `std::mt19937` had to be reproduced bit-for-bit in every language or the reconstructed node bytes would not match across systems. That is a nasty thing to depend on.
+
+splitmix64 removes the problem at the root. It is pure fixed-width integer arithmetic (add, xor, shift, multiply, all mod 2^64), with no floating point and no platform RNG, so it produces identical bytes everywhere by construction. To prove it, the prototype ships the two ports (`prototype/python/cuuid_v2.py`, `prototype/javascript/cuuid_v2.mjs`), each about 40 lines, and a cross-check (`prototype/cross_validate.sh`): the C++ codec emits test vectors and both ports reproduce every wire **byte-for-byte**.
+
+```text
+C++ emitted 36 test vectors
+Python port: 36 vectors match C++ byte-for-byte [OK]
+JavaScript port: 36 vectors match C++ byte-for-byte [OK]
+cross-language: C++ == Python == JavaScript [OK]
+```
+
+So a v2 is three coordinated changes, not one, but it is a **simplifying** three: every port deletes its Mersenne Twister (the whole of `mertwis.py`) and replaces it with a four-line splitmix64, and the cross-system determinism stops being something you pray for and becomes something the arithmetic guarantees. That trade, three small coordinated ports against a permanently cheaper, natively-sortable, and easier-to-port format, is the actual decision, and it is a good one whenever the format is next revised.
 
 ## The wider landscape (prior art)
 
@@ -173,6 +194,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target cuuid_compare cuuid_v2_demo
 ./build/cuuid_compare    # the comparison across schemes
 ./build/cuuid_v2_demo    # the working v2 prototype
+./prototype/cross_validate.sh   # C++ == Python == JavaScript, byte-for-byte
 ```
 
-UUIDv6, UUIDv7, ULID, and Snowflake are implemented inline in `benchmarks/compare.cc` so the harness is self-contained; cuuid is the real library. The v2 prototype lives in `prototype/` and does not touch the frozen codec. Absolute ns/op will vary by machine; the ratios are the point.
+UUIDv6, UUIDv7, ULID, and Snowflake are implemented inline in `benchmarks/compare.cc` so the harness is self-contained; cuuid is the real library. The v2 prototype lives in `prototype/` (C++ codec, Python and JavaScript ports, and the cross-language check) and does not touch the frozen codec. Absolute ns/op will vary by machine; the ratios are the point.
