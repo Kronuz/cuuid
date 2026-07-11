@@ -31,7 +31,11 @@
 
 #include <cstddef>         // for size_t
 #include <cstdint>         // for uint8_t, uint16_t, uint32_t, uint64_t
+#include <cstring>         // for std::memcpy
 #include <string>          // for std::string
+#if defined(_MSC_VER)
+#include <cstdlib>         // for _byteswap_uint64
+#endif
 
 #ifdef CUUID_EXCEPTION_HEADER
 #include CUUID_EXCEPTION_HEADER
@@ -116,6 +120,41 @@ unpack(char** const p)
 	}
 	*p = ptr;
 	return num;
+}
+
+
+// Big-endian round-trip for the condenser's two 64-bit words, written as a byteswap so the
+// compiler emits a single bswap instead of an 8-iteration byte loop (the generic pack/unpack
+// above stays for any other width).
+inline uint64_t to_be64(uint64_t x) {
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+	return x;
+#elif defined(_MSC_VER)
+	return _byteswap_uint64(x);
+#else
+	return __builtin_bswap64(x);
+#endif
+}
+
+
+template <>
+inline void
+pack<uint64_t>(char** p, uint64_t num)
+{
+	uint64_t be = to_be64(num);
+	std::memcpy(*p, &be, sizeof(be));
+	*p += sizeof(be);
+}
+
+
+template <>
+inline uint64_t
+unpack<uint64_t>(char** const p)
+{
+	uint64_t be;
+	std::memcpy(&be, *p, sizeof(be));
+	*p += sizeof(be);
+	return to_be64(be);
 }
 
 
