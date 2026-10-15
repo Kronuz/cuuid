@@ -1,5 +1,7 @@
 # cuuid
 
+[![CI](https://github.com/Kronuz/cuuid/actions/workflows/ci.yml/badge.svg)](https://github.com/Kronuz/cuuid/actions/workflows/ci.yml)
+
 Condensed UUID value type extracted from [Xapiand](https://github.com/Kronuz/Xapiand). It can generate, parse, format, serialise, and unserialise UUIDs, with Xapiand's compact binary wire encoding preserved byte-for-byte.
 
 ```cpp
