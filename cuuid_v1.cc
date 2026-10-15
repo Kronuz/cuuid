@@ -29,6 +29,7 @@
 #include <cassert>                                // for assert
 #include <cstring>                                // for memcmp
 #include <iomanip>                                // for std::setw and std::setfill
+#include <mutex>                                  // for std::mutex
 #include <random>                                 // for std::mt19937
 #include <sstream>                                // for std::ostringstream
 #include <stdexcept>                              // for std::bad_alloc
@@ -652,10 +653,25 @@ UUIDGenerator::newUUID()
 #endif
 
 
+// Compacting folds the clock sequence into the time's low bits, so two ids collide when
+// their clock sequences differ (FreeBSD's uuid_create bumps it within a tick). Time-based
+// ids therefore keep the process's first clock sequence and a strictly increasing time.
 UUID
 UUIDGenerator::operator ()(bool compact)
 {
 	auto uuid = newUUID();
+	if (uuid.uuid_variant() == 0x80 && uuid.uuid_version() == 1) {
+		static std::mutex mutex;
+		static uint64_t last = 0;
+		static int clock_seq = -1;
+		std::lock_guard<std::mutex> lock(mutex);
+		uint64_t time = uuid.uuid1_time();
+		if (time <= last) { time = last + 1; }
+		last = time;
+		if (clock_seq < 0) { clock_seq = uuid.uuid1_clock_seq(); }
+		uuid.uuid1_time(time);
+		uuid.uuid1_clock_seq(static_cast<uint16_t>(clock_seq));
+	}
 	if (compact) {
 		uuid.compact_crush();
 	}
