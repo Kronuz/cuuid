@@ -24,6 +24,7 @@
 #include "cuuid_v6.hh"
 
 #include <array>
+#include <mutex>
 
 #include "cuuid_common.h"                          // for condense/uncondense/crush_fields, splitmix64
 
@@ -95,12 +96,24 @@ make(uint64_t time, uint16_t clock, uint64_t node)
 }
 
 
+// Monotonic within the process: a platform mint whose clock does not advance between calls
+// (a coarse or stepped VM clock; FreeBSD's uuid_create in CI repeated values) moves one
+// 100ns tick past the last time instead, as RFC 9562 allows, so ids stay distinct and
+// sortable.
 UUID
 generate()
 {
 	UUIDGenerator gen;
 	UUID base = gen(false); // a fresh, uncompacted, version-1 time UUID
-	return make(base.uuid1_time(), base.uuid1_clock_seq(), base.uuid1_node());
+	uint64_t time = base.uuid1_time();
+	{
+		static std::mutex mutex;
+		static uint64_t last = 0;
+		std::lock_guard<std::mutex> lock(mutex);
+		if (time <= last) { time = last + 1; }
+		last = time;
+	}
+	return make(time, base.uuid1_clock_seq(), base.uuid1_node());
 }
 
 
