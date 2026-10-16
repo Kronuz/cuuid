@@ -2,7 +2,7 @@
 
 **Author:** [German Mendez Bravo](mailto:german.mb@gmail.com)
 **Date:** 2026-07-10
-**Status:** Draft spec for a second format inside [cuuid](https://github.com/Kronuz/cuuid)
+**Status:** Implemented in C++ (`cuuid_v6.{hh,cc}`, `cuuid.hh`); the Python and JS ports are still prototypes in `prototype/`
 
 ## TL;DR
 

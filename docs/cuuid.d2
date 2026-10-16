@@ -1,0 +1,8 @@
+# cuuid: condense and expand. Render: d2 --layout elk --sketch --theme 302 docs/cuuid.d2 docs/cuuid.svg
+direction: right
+uuid: "UUID (16 bytes)\ntime · clock seq · node" {shape: rectangle}
+cond: "condenser\ndrop the derivable node bits" {shape: hexagon}
+wire: "wire (~8 bytes)\ntime first, so it sorts" {shape: page}
+uuid -> cond: "serialise"
+cond -> wire
+wire -> uuid: "unserialise: rebuild the node\n(v6: splitmix64 · v1: mt19937)" {style.stroke-dash: 3}

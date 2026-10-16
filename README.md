@@ -1,61 +1,101 @@
 # cuuid
 
 [![CI](https://github.com/Kronuz/cuuid/actions/workflows/ci.yml/badge.svg)](https://github.com/Kronuz/cuuid/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)
 
-Condensed UUID value type extracted from [Xapiand](https://github.com/Kronuz/Xapiand). It can generate, parse, format, serialise, and unserialise UUIDs, with Xapiand's compact binary wire encoding preserved byte-for-byte.
+Condensed UUIDs for C++20: standard 16-byte UUIDs that serialize to about 8
+time-sortable bytes, with no worker-id coordination. That is half of UUIDv7, and the
+same as a 64-bit Snowflake.
 
-```cpp
-#include "cuuid_v1.hh"
+![cuuid: a 16-byte UUID condenses to a short, time-ordered wire form and back](docs/cuuid.svg)
 
-UUIDGenerator generator;
-UUID uuid = generator();
-std::string wire = uuid.serialise();
-UUID copy = UUID::unserialise(wire);
-```
+## ✨ Highlights
 
-## What it provides
+- 📏 **About 8 bytes on the wire** for present-day ids; the full 16-byte form is
+  always available.
+- 🔢 **Sorts by creation time** in its condensed form, as a database key.
+- ⚡ **v6, the default**: UUIDv6 layout and splitmix64 node reconstruction, about
+  9 ns to encode and 12 ns to decode.
+- 🧊 **v1, frozen**: Xapiand's original codec, byte for byte, for existing data
+  (`Codec::v1`).
+- 🔍 **Validators and accessors**: `is_valid()`, `is_serialised()`, and the v1 node,
+  time, clock sequence, variant, and version fields.
 
-- `UUID`, a 16-byte value wrapper with string parsing and formatting.
-- `UUIDGenerator`, backed by the platform UUID API.
-- Full serialisation: tag byte `0x01` plus the 16 UUID bytes.
-- Condensed serialisation for RFC 4122 version-1 UUIDs when the node/time/clock fields can be packed smaller.
-- `is_valid()` and `is_serialised()` validators for string and wire forms.
-- UUID v1 field accessors for node, time, clock sequence, variant, and version.
+## 📦 Installation
 
-## Dependencies
-
-`cuuid` depends on two small Kronuz libraries:
-
-- `endian` for byte-order macros (`endian.hh`).
-- `char-classify` for hex parsing and rendering (`chars.hh`).
-
-It also uses the platform UUID backend. Linux and Darwin use `uuid/uuid.h` (`UUID_LIBUUID`); FreeBSD uses `uuid.h` (`UUID_FREEBSD`).
-
-## Build and test
-
-```sh
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-ctest --test-dir build
-```
-
-## How it compares (Snowflake, UUIDv7, and the rest)
-
-cuuid is a version-1 UUID plus a condensed, variable-length wire codec. That codec makes it byte-sortable and, for present-day timestamps, **8 bytes on the wire** (half of UUIDv7, equal to a 64-bit Snowflake, with no worker-id coordination). The trade is CPU: the compact path runs a Mersenne-Twister node reconstruction on both encode and decode.
-
-See **[COMPARISON.md](COMPARISON.md)** for the full analysis against Snowflake, UUIDv7, UUIDv6, and ULID: benchmark data, the time-dependent size and ~1.64 ms sort floor, where it shines and where it breaks down, and two concrete ways to make it faster and natively sortable. Run the harness yourself:
-
-```sh
-cmake --build build --target cuuid_compare
-./build/cuuid_compare
-```
-
-## Use with FetchContent
+Requires a C++20 compiler, CMake 3.14 or newer, and the platform UUID library
+(libuuid on Linux; built in on macOS and FreeBSD). It brings
+[endian](https://github.com/Kronuz/endian) and
+[char-classify](https://github.com/Kronuz/char-classify). CI builds it on Linux
+(x86_64, arm64), macOS (arm64, x86_64), and FreeBSD, plus ASan, UBSan, and TSan
+builds.
 
 ```cmake
-FetchContent_Declare(cuuid GIT_REPOSITORY https://github.com/Kronuz/cuuid.git GIT_TAG main)
+include(FetchContent)
+FetchContent_Declare(cuuid
+  GIT_REPOSITORY https://github.com/Kronuz/cuuid.git
+  GIT_TAG        main)
 FetchContent_MakeAvailable(cuuid)
-target_link_libraries(your_app PRIVATE cuuid::cuuid)
+
+target_link_libraries(my_app PRIVATE cuuid::cuuid)
 ```
 
-Hosts that need app-specific tracing, exceptions, or local-node salting can override the three seams with `CUUID_TRACE_HEADER`, `CUUID_EXCEPTION_HEADER`, and `CUUID_NODE_HEADER`.
+## 🚀 Quick start
+
+```cpp
+#include "cuuid.hh"
+
+#include <cassert>
+#include <iostream>
+
+int main() {
+	UUID id = cuuid::generate();                   // v6
+	std::string wire = cuuid::serialise(id);       // ~8 bytes, sorts by time
+	assert(cuuid::unserialise(wire) == id);
+	std::cout << id << " -> " << wire.size() << " bytes\n";
+}
+```
+
+Decoding uses the codec you run: `Codec::v6` by default, or `Codec::v1` for data
+written by the original codec. The condensed wire carries no version marker.
+
+## ⚙️ Configuration
+
+A host can replace three seams by defining a header before the build:
+`CUUID_TRACE_HEADER` (logging), `CUUID_EXCEPTION_HEADER` (errors), and
+`CUUID_NODE_HEADER` (the local node salt).
+
+## 🎯 When to use it
+
+- ✅ Billions of ids stored as keys, small and time-sorted, without coordination,
+  where you control both ends of the wire.
+- ❌ A greenfield system that must interoperate: use UUIDv7. Or use Snowflake if
+  64-bit ids with worker coordination are acceptable.
+
+## 📚 Documentation
+
+- [ARCHITECTURE.md](ARCHITECTURE.md): the condenser and the wire format.
+- [docs/COMPARISON.md](docs/COMPARISON.md): against Snowflake, UUIDv6, UUIDv7, and
+  ULID, with benchmarks.
+- [docs/CUUID_V6.md](docs/CUUID_V6.md): the v6 format.
+- [docs/MIGRATION.md](docs/MIGRATION.md): rolling out v6 beside v1.
+- [AGENTS.md](AGENTS.md): repository map and invariants.
+
+## 🛠️ Building and testing
+
+```sh
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
+ctest --test-dir build
+./build/cuuid_demo && ./build/cuuid_compare
+```
+
+## 🤝 Contributing
+
+Issues and pull requests are welcome. Read [AGENTS.md](AGENTS.md) first. CI must
+pass on every platform.
+
+## 📄 License
+
+MIT, Copyright (c) 2015-2019 Dubalu LLC. See [LICENSE](LICENSE). Extracted from
+[Xapiand](https://github.com/Kronuz/Xapiand).
