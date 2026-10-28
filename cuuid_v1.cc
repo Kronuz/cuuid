@@ -1,4 +1,5 @@
 /*
+ * Copyright © 2026 Germán Méndez Bravo (Kronuz)
  * Copyright (c) 2015-2019 Dubalu LLC
  * Copyright (c) 2014 Graeme Hill (http://graemehill.ca).
  *
