@@ -4,7 +4,7 @@ Orientation for anyone working on this library. Read `ARCHITECTURE.md` for the d
 
 ## What this is
 
-Condensed UUID parsing, formatting, generation, and binary serialisation extracted from Xapiand. The algorithm and wire format are a faithful port of `src/cuuid/uuid.{h,cc}`; only app couplings became seams.
+Condensed UUID parsing, formatting, generation, and binary serialisation extracted from Xapiand. The wire format matches Xapiand's `src/cuuid/uuid.{h,cc}` (apart from the node salt, below); app couplings are compile-time seams.
 
 ## File map
 
@@ -38,21 +38,18 @@ docs/cuuid.d2                   README diagram; render: d2 --layout elk --sketch
 
 ## Invariants
 
-- **Wire format is byte-identical.** Do not change the full tag (`0x01`), the condensed bit layout, byte order, or the variable-length prefix table during extraction work.
-- **Keep the algorithms faithful.** No cleanup, optimization, or behavior change belongs in the extraction commit.
+- **Wire format is byte-identical.** Do not change the full tag (`0x01`), the condensed bit layout, byte order, or the variable-length prefix table.
+- **Optimizations keep the wire bytes.** A faster path must produce the same bytes and prove it with a differential test, as `test/test_mt.cc` does for the v1 node expander.
 - **Public API stays global.** `UUID`, `UUIDGenerator`, and `UUID_LENGTH` remain in the global namespace so Xapiand only needs include swaps.
 - **Seams stay compile-time and no-op by default.** A standalone consumer must not need Xapiand's logger, exception hierarchy, or `Node` registry.
 
-## Invariants / suspected pre-existing bugs
+## Node salt
 
-- **[FIXED, breaking] Node salt now uses bitwise OR.** `UUID::compact_crush()` computes the
-  compacted-UUID salt as `fnv_1a((local_node_hash | node))`. The Xapiand original used a
-  logical OR (`||`), which collapsed the node to a boolean before hashing, so every non-zero
-  node produced the SAME salt (a compiler `-Wconstant-logical-operand` warning even flags it).
-  Reproduced: over 200k distinct nodes the `||` form yields 1 distinct salt; `|` yields the full
-  128-bucket spread. Fixed here. This CHANGES the salt bits of newly-compacted v1 UUIDs versus
-  older versions (a deliberate breaking change for the version bump); reading previously-stored
-  condensed UUIDs is unaffected (the stored salt is read back as-is).
+- **The node salt uses bitwise OR.** `UUID::compact_crush()` computes the compacted-UUID salt
+  as `fnv_1a((local_node_hash | node))`, which spreads distinct nodes over all 128 salt values.
+  Xapiand uses logical OR (`||`), which gives every non-zero node the same salt, so v1 ids
+  compacted here carry different salt bits than Xapiand's. Stored condensed UUIDs decode
+  either way, because the stored salt is read back as is. Don't "restore" the `||`.
 
 ## Build / test
 

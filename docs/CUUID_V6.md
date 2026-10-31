@@ -12,7 +12,7 @@
 
 The measurements from `prototype/` and `COMPARISON.md`, stated without inflation:
 
-- **Decode speed (the prize).** v1 runs `std::mt19937` in `calculate_node()` on every decode of a compacted id: **~843 to 1043 ns**. v6's splitmix64 does the same job in **~7 ns**. For a search engine that reads billions of ids, that is the real saving: CPU, latency, cost, on every read.
+- **Decode speed (the prize).** v1 runs `std::mt19937` in `calculate_node()` on every decode of a compacted id: **~843 to 1043 ns** with a full engine, about 590 ns with the partial expander v1 uses (see [CHANGELOG.md](../CHANGELOG.md)). v6's splitmix64 does the same job in **~7 ns**. For a search engine that reads billions of ids, that is the real saving: CPU, latency, cost, on every read.
 - **Portability.** splitmix64 is fixed-width integer arithmetic, identical across C++/Python/JS by construction, so every port drops its hand-rolled Mersenne Twister (`contrib/python/cuuid/mertwis.py`) for four lines.
 - **Cleaner semantics.** Milliseconds instead of 100 ns ticks, no XOR fold, no clock scrambling; a clean 1 ms sort granularity rather than v1's scrambled 1.64 ms floor.
 - **Marginal size.** v6 is a 4-byte payload for about a year near its 2026 epoch, and stays 8 bytes where v1 slowly creeps to 9 past ~2100.

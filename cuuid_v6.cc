@@ -109,7 +109,7 @@ generate()
 	UUID base = gen(false); // a fresh, uncompacted, version-1 time UUID
 	uint64_t time = base.uuid1_time();
 	{
-		// Lock-free: claim max(time, last + 1) with a CAS, the same sequence the mutex gave.
+		// Lock-free: claim max(time, last + 1) with a CAS.
 		static std::atomic<uint64_t> last{0};
 		uint64_t prev = last.load(std::memory_order_relaxed);
 		uint64_t next;

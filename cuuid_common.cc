@@ -179,7 +179,7 @@ crush_fields(uint64_t& time, uint16_t& clock, uint64_t& node, NodeExpander expan
 		condenser.compact.salt = node & SALT_MASK;
 	} else {
 		auto lnh = ::cuuid::local_node_hash();
-		auto salt = fnv_1a((lnh ? *lnh : 0) | node); // bitwise OR mixes the node identity into the salt. (Was `|| node` in Xapiand -- a logical OR that collapsed every non-zero node to a single salt; fixed here, which changes newly-compacted UUID salt bits vs older versions.)
+		auto salt = fnv_1a((lnh ? *lnh : 0) | node); // bitwise OR mixes the node identity into the salt (Xapiand's `||` gives every node one salt).
 		salt = xor_fold(salt, SALT_BITS);
 		condenser.compact.salt = salt & SALT_MASK;
 	}

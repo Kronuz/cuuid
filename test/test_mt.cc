@@ -1,6 +1,6 @@
 // Differential tests for the v1 node expander: the shortcut that computes only the
 // std::mt19937 state words the first two outputs depend on must equal the real engine,
-// and every v1 wire byte must equal the one the original (full engine) expander gives.
+// and every v1 wire byte must equal the one a full-engine reference expander gives.
 #include "cuuid_common.h"
 #include "cuuid_v1.hh"
 
@@ -18,7 +18,7 @@ static int failures = 0;
 		}                                                                        \
 	} while (0)
 
-// Frozen copy of the original expander.
+// Frozen full-engine reference expander.
 static uint64_t reference_expand(uint32_t seed) {
 	std::mt19937 rng(seed);
 	uint64_t node = rng();

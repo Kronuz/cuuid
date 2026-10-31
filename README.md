@@ -75,13 +75,18 @@ A host can replace three seams by defining a header before the build:
 - ❌ A greenfield system that must interoperate: use UUIDv7. Or use Snowflake if
   64-bit ids with worker coordination are acceptable.
 
-## ⚡ Performance note
+## ⚡ Performance
 
-A compact v1 id needs the first two outputs of `std::mt19937(seed)`. `expand_mt_compute` computes only the 399 state
-words those depend on and skips the twist (about 900 ns to 590 ns on an Apple M4 Pro), and a small thread-local cache
-makes repeated work on one id cheap (serialise of the same id: 911 ns to 9 ns). The wire bytes are identical
-(`test/test_mt.cc` checks them against the real engine). v6 `generate()` keeps its monotonic time with a lock-free CAS.
-`benchmarks/v1_bench.cc` (`cuuid_v1_bench`).
+v6 encodes in about 9 ns and decodes in about 12 ns (release build, see
+[docs/COMPARISON.md](docs/COMPARISON.md)). A compact v1 id needs the first two outputs of
+`std::mt19937(seed)`; `expand_mt_compute` computes only the 399 state words those
+depend on, and a small thread-local cache serves repeated work on one id. On an
+Apple M4 Pro, v1 `serialise` of a new id takes about 590 ns and of a repeated id
+about 9 ns. Run the v1 benchmark with:
+
+```sh
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build && ./build/cuuid_v1_bench
+```
 
 ## 📚 Documentation
 
@@ -91,6 +96,7 @@ makes repeated work on one id cheap (serialise of the same id: 911 ns to 9 ns). 
 - [docs/CUUID_V6.md](docs/CUUID_V6.md): the v6 format.
 - [docs/MIGRATION.md](docs/MIGRATION.md): rolling out v6 beside v1.
 - [AGENTS.md](AGENTS.md): repository map and invariants.
+- [CHANGELOG.md](CHANGELOG.md): behavior and performance changes.
 
 ## 🛠️ Building and testing
 

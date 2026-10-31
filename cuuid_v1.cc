@@ -56,7 +56,7 @@
 #endif
 
 
-// v1's node expander: the original std::mt19937 draw. This is the ONE piece v6 swaps
+// v1's node expander: the std::mt19937 draw. This is the ONE piece v6 swaps
 // out (for splitmix64); everything else in calculate_node() is shared (cuuid_common).
 //
 // The node is the first two outputs of std::mt19937(seed): (out0 << 32) | out1.
