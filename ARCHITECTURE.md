@@ -23,6 +23,10 @@ UUID text / bytes
 
 The condensed path packs the v1 time, clock sequence, compact marker, and either the full node or a compact node reconstructed from a salt. `UUIDCondenser::serialise()` then strips leading zero bytes and stores the resulting length in the high bits of the first byte. `UUID::unserialise()` reverses that process and reconstructs the UUID fields.
 
+### v1 node expander speed
+
+A compact v1 node is the first two `std::mt19937(seed)` outputs, `(out0 << 32) | out1`. Building the engine and drawing twists all 624 words, but output k of the first generation depends only on state words k, k+1 and k+397 (k, k+1, k+397, k+398 for outputs 0 and 1), so `expand_mt_compute` runs the init recurrence `mt[i] = 1812433253 * (mt[i-1] ^ (mt[i-1] >> 30)) + i` up to word 398 (a serial chain with no closed form, so this is the floor) and applies the twist and tempering to those words only. A small thread-local direct-mapped cache (8 entries, keyed by seed) covers `generate()` followed by `serialise()` of the same id. `test/test_mt.cc` compares it with the real engine over many seeds and checks the wire bytes against a frozen full-engine expander. v6's `generate()` keeps its monotonic-time guarantee with a lock-free CAS on an atomic instead of a mutex.
+
 The wire format is an invariant. Do not change tags, bit layout, byte order, or the variable-length prefix table without a separate compatibility plan.
 
 ## Seams

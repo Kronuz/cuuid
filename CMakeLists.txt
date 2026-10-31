@@ -80,11 +80,18 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 	target_link_libraries(cuuid_v6_test PRIVATE cuuid)
 	add_test(NAME cuuid_v6 COMMAND cuuid_v6_test)
 
+	add_executable(cuuid_mt_test test/test_mt.cc)
+	target_link_libraries(cuuid_mt_test PRIVATE cuuid)
+	add_test(NAME cuuid_mt COMMAND cuuid_mt_test)
+
 	add_executable(cuuid_demo examples/demo.cc)
 	target_link_libraries(cuuid_demo PRIVATE cuuid)
 
 	add_executable(cuuid_benchmark benchmarks/serialise_parse.cc)
 	target_link_libraries(cuuid_benchmark PRIVATE cuuid)
+
+	add_executable(cuuid_v1_bench benchmarks/v1_bench.cc)
+	target_link_libraries(cuuid_v1_bench PRIVATE cuuid)
 
 	add_executable(cuuid_compare benchmarks/compare.cc)
 	target_link_libraries(cuuid_compare PRIVATE cuuid)

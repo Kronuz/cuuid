@@ -25,6 +25,7 @@
 #include "cuuid_v6.hh"
 
 #include <array>
+#include <atomic>
 #include <mutex>
 
 #include "cuuid_common.h"                          // for condense/uncondense/crush_fields, splitmix64
@@ -108,11 +109,14 @@ generate()
 	UUID base = gen(false); // a fresh, uncompacted, version-1 time UUID
 	uint64_t time = base.uuid1_time();
 	{
-		static std::mutex mutex;
-		static uint64_t last = 0;
-		std::lock_guard<std::mutex> lock(mutex);
-		if (time <= last) { time = last + 1; }
-		last = time;
+		// Lock-free: claim max(time, last + 1) with a CAS, the same sequence the mutex gave.
+		static std::atomic<uint64_t> last{0};
+		uint64_t prev = last.load(std::memory_order_relaxed);
+		uint64_t next;
+		do {
+			next = time > prev ? time : prev + 1;
+		} while (!last.compare_exchange_weak(prev, next, std::memory_order_relaxed));
+		time = next;
 	}
 	return make(time, base.uuid1_clock_seq(), base.uuid1_node());
 }

@@ -75,6 +75,14 @@ A host can replace three seams by defining a header before the build:
 - ❌ A greenfield system that must interoperate: use UUIDv7. Or use Snowflake if
   64-bit ids with worker coordination are acceptable.
 
+## ⚡ Performance note
+
+A compact v1 id needs the first two outputs of `std::mt19937(seed)`. `expand_mt_compute` computes only the 399 state
+words those depend on and skips the twist (about 900 ns to 590 ns on an Apple M4 Pro), and a small thread-local cache
+makes repeated work on one id cheap (serialise of the same id: 911 ns to 9 ns). The wire bytes are identical
+(`test/test_mt.cc` checks them against the real engine). v6 `generate()` keeps its monotonic time with a lock-free CAS.
+`benchmarks/v1_bench.cc` (`cuuid_v1_bench`).
+
 ## 📚 Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): the condenser and the wire format.

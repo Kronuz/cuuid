@@ -58,12 +58,58 @@
 
 // v1's node expander: the original std::mt19937 draw. This is the ONE piece v6 swaps
 // out (for splitmix64); everything else in calculate_node() is shared (cuuid_common).
+//
+// The node is the first two outputs of std::mt19937(seed): (out0 << 32) | out1.
+// Constructing the engine initialises 624 state words and its first draw twists all
+// of them, but output k of the first generation depends on only four words:
+//     mt'[k] = mt[k + 397] ^ twist(mt[k] upper bit, mt[k + 1] lower 31 bits)
+// so outputs 0 and 1 need mt[0..2], mt[397] and mt[398]. The init recurrence
+//     mt[i] = 1812433253 * (mt[i - 1] ^ (mt[i - 1] >> 30)) + i
+// is a serial chain with no closed form, so words 0..398 are computed (about 64% of
+// the init, none of the twist) and the rest is skipped. Bit-identical to the engine
+// (tested over many seeds against std::mt19937).
+uint64_t expand_mt_compute(uint32_t seed) {
+	constexpr uint32_t F = 1812433253u;
+	uint32_t m0 = seed;
+	uint32_t m1 = 0, m2 = 0;
+	uint32_t x = seed;
+	for (uint32_t i = 1; i < 398; ++i) {
+		x = F * (x ^ (x >> 30)) + i;
+		if (i == 1) m1 = x;
+		else if (i == 2) m2 = x;
+	}
+	const uint32_t m397 = x;
+	const uint32_t m398 = F * (x ^ (x >> 30)) + 398;
+
+	auto gen = [](uint32_t cur, uint32_t next, uint32_t far) {
+		uint32_t y = (cur & 0x80000000u) | (next & 0x7fffffffu);
+		uint32_t v = far ^ (y >> 1) ^ ((y & 1u) ? 0x9908b0dfu : 0u);
+		// tempering
+		v ^= v >> 11;
+		v ^= (v << 7) & 0x9d2c5680u;
+		v ^= (v << 15) & 0xefc60000u;
+		v ^= v >> 18;
+		return v;
+	};
+	const uint64_t a = gen(m0, m1, m397);
+	const uint64_t b = gen(m1, m2, m398);
+	return (a << 32) | b;
+}
+
+
+// A small thread-local direct-mapped cache: generate(compact) is usually followed by
+// serialise() of the same value, and a repeated serialise/unserialise of one id
+// re-derives the same seed. The function is pure, so a hit is always exact.
 static uint64_t expand_mt(uint32_t seed) {
-	std::mt19937 rng(seed);
-	uint64_t node = rng();
-	node <<= 32;
-	node |= rng();
-	return node;
+	struct Entry { uint64_t node; uint32_t seed; bool valid; };
+	constinit static thread_local Entry cache[8] = {};
+	Entry& e = cache[(seed * 2654435761u) >> 29];
+	if (!e.valid || e.seed != seed) {
+		e.node = expand_mt_compute(seed);
+		e.seed = seed;
+		e.valid = true;
+	}
+	return e.node;
 }
 
 

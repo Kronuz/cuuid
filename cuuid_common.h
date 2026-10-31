@@ -234,6 +234,11 @@ union UUIDCondenser {
 using NodeExpander = uint64_t (*)(uint32_t seed);
 
 
+// v1's expander without the cache: the first two std::mt19937(seed) outputs, computed from
+// the five state words they depend on. Exposed so the tests can compare it against the engine.
+uint64_t expand_mt_compute(uint32_t seed);
+
+
 // Reconstruct a compacted node from the condenser's (time, clock, salt), using the given
 // expander for the seed -> raw-node step. Identical for v1 and v6 apart from the expander.
 uint64_t calculate_node(const UUIDCondenser& condenser, NodeExpander expand);

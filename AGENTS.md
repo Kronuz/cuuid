@@ -21,8 +21,10 @@ cuuid_exception.h               std-based THROW defaults, override with CUUID_EX
 cuuid_node.h                    local_node_hash() default, override with CUUID_NODE_HEADER.
 examples/demo.cc                Generate, serialise, unserialise, and print a UUID.
 test/test.cc                    ctest coverage for string/wire round-trips and v1 fields.
+test/test_mt.cc                 Differential test: fast v1 node expander vs std::mt19937 and frozen full-engine wire bytes.
 test/test_v6.cc                 ctest coverage for v6 round-trips, UUIDv6 layout, sort, dispatch.
 benchmarks/serialise_parse.cc   Small serialise/parse throughput harness.
+benchmarks/v1_bench.cc          v1 serialise/unserialise/generate ns per op (cuuid_v1_bench).
 benchmarks/compare.cc           cuuid against Snowflake, UUIDv6, UUIDv7, ULID (cuuid_compare).
 prototype/                      v6 prototypes, Python/JS ports, cross-validation; v2_demo.cc builds as cuuid_v2_demo.
 docs/COMPARISON.md, CUUID_V6.md, MIGRATION.md
