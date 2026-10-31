@@ -8,11 +8,11 @@
 
 `cuuid` is not an ID-generation scheme in the sense Snowflake or UUIDv7 are. It generates a plain **RFC 4122 version-1** UUID (via `uuid_generate_time`) and adds one distinctive thing on top: a **condensed, variable-length wire codec**. That codec is where all the interest, and all the argument, lives.
 
-Measured on an M-series Mac, the honest picture is below. The v1 figures in this document construct a full `std::mt19937` per call. The v1 codec computes only the 399 state words the node needs, so an uncached v1 `serialise` takes about 590 ns and a repeated id about 9 ns (Apple M4 Pro, `cuuid_v1_bench`); see [CHANGELOG.md](../CHANGELOG.md).
+Timings are from an Apple M4 Pro, Apple clang 17 with `-O3 -DNDEBUG`, measured under `quiet strict` at `d03d8d1` (`cuuid_compare` and `cuuid_v1_bench`). The v1 codec computes only the 399 `std::mt19937` state words the node needs, so a `serialise` of a new id takes about 620 ns and of a repeated id about 10 ns.
 
 - **Size.** A compacted cuuid is **8 bytes** for any present-day timestamp, the same as a 64-bit Snowflake and half of UUIDv7's 16, but without Snowflake's worker-id coordination. The often-quoted 4-byte figure is real only for timestamps within about a year of cuuid's 2016 epoch; the existing `serialise_parse` benchmark hits it because it feeds near-zero timestamps.
 - **Sortable? Yes.** The condensed wire puts time in the most-significant bits, so it sorts lexicographically by creation time, down to a **~1.64 ms** resolution floor. This is the answer to "can cuuid be sorted like Snowflake": on the wire, yes. In its **canonical 16-byte v1 form, no** (the classic v1 problem UUIDv6 exists to fix), which is exactly what the shipped **v6** format cures by storing the bytes in UUIDv6 order.
-- **Cost.** The compact path costs **~850 to 950 ns to encode and to decode**, versus single-digit nanoseconds for Snowflake, UUIDv7, UUIDv6, and ULID. Nearly all of it is one `std::mt19937` **construction** inside `calculate_node()`. Swapping in a cheap mixer (splitmix64) does the identical job in **~2 ns**. The **v6 format** does this (see [Two ways forward](#two-ways-forward)): reconstructing the node with splitmix64, plus byteswapping the condenser's two 64-bit words (a single `bswap` instead of a byte loop), drops the whole compact path to a measured **~9 ns to encode and ~12 ns to decode** (release, N = 1M), roughly 70 to 90x faster. It changes the reconstructed node bytes, so it is a new format, told apart from v1 by the standard UUID version nibble rather than a drop-in patch.
+- **Cost.** The compact path costs **~620 ns to encode and to decode**, versus single-digit nanoseconds for Snowflake, UUIDv7, UUIDv6, and ULID. Nearly all of it is the node derivation inside `calculate_node()`: the first two outputs of `std::mt19937(seed)`. Constructing the full engine takes ~930 ns, and swapping in a cheap mixer (splitmix64) does the identical job in **~2 ns**. The **v6 format** does this (see [Two ways forward](#two-ways-forward)): reconstructing the node with splitmix64, plus byteswapping the condenser's two 64-bit words (a single `bswap` instead of a byte loop), makes the whole compact path **~11 ns to encode and ~12 ns to decode** (4,096 distinct ids), roughly 50x faster. It changes the reconstructed node bytes, so it is a new format, told apart from v1 by the standard UUID version nibble rather than a drop-in patch.
 
 **Verdict.** cuuid earns its keep in exactly one niche: a store that keeps billions of ids as keys, wants them small and time-sortable, cannot pay for coordination, and controls both ends of the wire. That is Xapiand, where it was born. For a greenfield system in 2026 the better default is **UUIDv7** (standard, sortable, no MAC leak, libraries everywhere), or **Snowflake** if a 64-bit id and worker coordination are acceptable, or **UUIDv6** if you specifically want the v1 data model made natively sortable. The Mersenne-Twister cost was a fixable wart, not a design law, and the **v6** format fixes it while keeping the 8-byte wire.
 
@@ -34,20 +34,24 @@ The one row that captures cuuid's whole personality is **wire size**: it is the 
 
 ## Benchmark results
 
-From `benchmarks/compare.cc` (release build, N = 200k). Numbers are ns/op; reproduce with `./build/cuuid_compare`.
+From `benchmarks/compare.cc` (N = 200k). Numbers are ns/op, the mean of two runs on an Apple M4 Pro, Apple clang 17 with `-O3 -DNDEBUG -std=gnu++20`, measured under `quiet strict` at `d03d8d1`. Reproduce with:
+
+```sh
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build && ./build/cuuid_compare
+```
 
 ### Generation and codec
 
 | Scheme | generate | serialise | parse | wire bytes |
 |---|---|---|---|---|
-| cuuid v1, no compact | 91 | 823 | 9.7 | 16 |
-| cuuid v1, compact | 953 | 883 | 904 | 8 |
-| UUIDv7 | 4.5 | 0.7 | 0.4 | 16 |
-| UUIDv6 | 0.3 | ~0 | ~0 | 16 |
-| ULID | 4.7 | ~0 | ~0 | 16 |
-| Snowflake | 0.7 | 1.1 | 2.2 | 8 |
+| cuuid v1, no compact | 91 | 621 | 11 | 16 |
+| cuuid v1, compact | 682 | 621 | 624 | 8 |
+| UUIDv7 | 4.9 | 0.8 | 0.4 | 16 |
+| UUIDv6 | 1.1 | ~0 | ~0 | 16 |
+| ULID | 5.0 | ~0 | ~0 | 16 |
+| Snowflake | 0.7 | 1.0 | 2.8 | 8 |
 
-Two things stand out. First, cuuid's codec is two to three orders of magnitude more expensive than the others, on both encode and decode. Second, even the **expanded** (non-compacted) serialise costs ~820 ns, because `serialise_condensed()` always calls `calculate_node()` to decide between the compact and expanded layouts, and that call is the expensive one.
+Two things stand out. First, cuuid's codec is two to three orders of magnitude more expensive than the others, on both encode and decode. Second, even the **expanded** (non-compacted) serialise costs ~620 ns, because `serialise_condensed()` always calls `calculate_node()` to decide between the compact and expanded layouts, and that call is the expensive one.
 
 ### Wire size is time-dependent
 
@@ -107,7 +111,7 @@ Below its time resolution, a scheme keeps order only if it has a monotone tie-br
 
 **Worst case (breaks down, though never incorrect):**
 
-- **Read-heavy workloads.** Every decode of a compacted **v1** id runs a Mersenne-Twister construction (~880 ns). At millions of reads per second that is real CPU and real money. (The **v6** format removes this: splitmix64 reconstruction decodes in ~16 ns.)
+- **Read-heavy workloads.** Every decode of a compacted **v1** id derives its node from `std::mt19937(seed)` (~620 ns). At millions of reads per second that is real CPU and real money. (The **v6** format removes this: splitmix64 reconstruction decodes in ~12 ns.)
 - **Sub-millisecond ordering.** Anything needing strict order at finer than ~1.64 ms will not get it from the condensed wire.
 - **Non-v1 UUIDs.** A v4 (random) UUID has no compressible structure, so cuuid falls back to the full 17-byte form (tag + 16 bytes), which is **larger** than a raw 16-byte UUID. The compression is a v1/v6-only trick.
 - **Canonical-form sortability and privacy.** If a consumer sorts or indexes the canonical 16 bytes rather than the wire, **v1** gives non-sortability and a MAC-address leak. (The **v6** format fixes the sortability: its canonical bytes are UUIDv6, time-ordered; the node is still a synthetic, salted value, not a MAC.)
@@ -122,12 +126,12 @@ Nothing here is a correctness bug. These are the honest edges of a design that t
 > verbatim, swapping only `std::mt19937` for splitmix64 and laying the bytes out in UUIDv6
 > order. That makes it a smaller delta than the from-scratch prototype below (which explored
 > a separate ms-since-2026 time base and its own splitmix derivation). Measured on the shipped
-> library: **~9 ns encode, ~12 ns decode**, 8-byte compact wire, canonical form sorts by time.
+> library: **~11 ns encode, ~12 ns decode**, 8-byte compact wire, canonical form sorts by time.
 > Xapiand mints v6 by default; `--legacy-ids` pins pure v1.
 
 ### 1. Kill the Mersenne Twister (a format v2)
 
-`calculate_node()` reconstructs a synthetic 48-bit node from `(time, clock, salt)`. The node's actual value is arbitrary; it just has to be deterministic, carry the salt, and set the multicast bit. The current code uses `std::mt19937`, whose per-call **construction** (a 624-word state init) is the ~880 ns. A splitmix64 mixer produces an equally good synthetic node in **~2 ns** (section G), which would drop the compact path from ~1 us to roughly the cost of the `std::string` allocation and bit-packing, tens of nanoseconds.
+`calculate_node()` reconstructs a synthetic 48-bit node from `(time, clock, salt)`. The node's actual value is arbitrary; it just has to be deterministic, carry the salt, and set the multicast bit. v1 uses `std::mt19937`: constructing the engine (a 624-word state init) takes ~930 ns, and the 399-word derivation the library uses takes ~620 ns. A splitmix64 mixer produces an equally good synthetic node in **~2 ns** (section G), which would drop the compact path from ~620 ns to roughly the cost of the `std::string` allocation and bit-packing, tens of nanoseconds.
 
 The catch is that the node bytes are part of the wire format, so changing the mixer changes what a compacted id decodes to. That makes it a **breaking, versioned change**, gated behind a new tag so existing `0x01` and current condensed ids still decode. Worth doing precisely because it removes the library's one embarrassing number without touching what it is good at.
 
@@ -139,18 +143,18 @@ This is orthogonal to size: v6 is still 16 bytes canonical. The appealing combin
 
 ## Prototype: a working v2
 
-I built that v2 as a standalone prototype (`prototype/cuuid_v2.hh` and `prototype/v2_demo.cc`) to check the design end to end. It does not touch the frozen `uuid.hh` / `uuid.cc`; it stores as UUIDv6, reconstructs the compacted node with splitmix64, stores the timestamp as milliseconds since a 2026 epoch, and keeps the variable-length wire with a nonzero first byte so the `~` text form survives (see "Backward compatibility and the text form" below). Measured (`./build/cuuid_v2_demo`, same machine):
+I built that v2 as a standalone prototype (`prototype/cuuid_v2.hh` and `prototype/v2_demo.cc`) to check the design end to end. It does not touch the frozen `uuid.hh` / `uuid.cc`; it stores as UUIDv6, reconstructs the compacted node with splitmix64, stores the timestamp as milliseconds since a 2026 epoch, and keeps the variable-length wire with a nonzero first byte so the `~` text form survives (see "Backward compatibility and the text form" below). Measured (`./build/cuuid_v2_demo`, Apple M4 Pro, same build as above):
 
 | | v2 prototype | v1 (current) |
 |---|---|---|
-| encode | ~12 ns | ~880 ns |
-| decode | ~8 ns | ~850 ns |
+| encode | ~9 ns | ~620 ns |
+| decode | ~5 ns | ~620 ns |
 | compact wire | 5 bytes (2026) to 9 bytes steady (8 with a VL-folded length, = v1) | 8 bytes |
 | condensed wire sortable | yes (1.0000) | yes (1.0000) |
 | **canonical bytes sortable** | **yes (1.0000, v6)** | **no (v1)** |
 
 - **Correctness.** 200k random ids round-trip with zero failures in both compact and expanded modes, and through the canonical v6 form.
-- **Speed.** The Mersenne Twister is gone; encode and decode drop by ~70x and ~100x. This is the whole-codec number, not just the mixer in isolation.
+- **Speed.** The Mersenne Twister is gone; encode and decode drop by ~70x and ~125x. This is the whole-codec number, not just the mixer in isolation.
 - **Sortability.** Both the condensed wire and the raw v6 bytes sort by creation time. The second one is the real gain: a consumer can index the canonical bytes directly, no codec on the read path at all.
 - **Coexistence.** Old and new ids live in one store, versioned out of band (see below). Old data keeps decoding.
 

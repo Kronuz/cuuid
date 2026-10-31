@@ -6,13 +6,13 @@
 
 ## TL;DR
 
-`cuuid` keeps its name and gains a second wire format, **v6**, beside the existing **v1**. On encode they are told apart by the standard UUID **version nibble** (1 vs 6); on decode the running mode decides (default v6, `--legacy-ids` pure v1). v6 is v1 **minus the Mersenne Twister**: it reconstructs the compacted node with splitmix64 instead of `std::mt19937`, stores the timestamp as milliseconds since a 2026 epoch, and yields a UUIDv6 canonical form. Its win is **speed**, roughly **120x faster decode** (~7 ns vs ~900 ns, paid on every read), plus a cleaner, no-Mersenne-Twister port in every language. Raw-wire size and index sortability are **the same as v1** (v1's compact wire already sorts), so v6 is a faster, cleaner version of the same idea, not a smaller one. New ids are minted v6 by default; old v1 ids still resolve by their bytes, at the cost of a documented change to how their canonical form renders (see `upgrade.md`).
+`cuuid` keeps its name and gains a second wire format, **v6**, beside the existing **v1**. On encode they are told apart by the standard UUID **version nibble** (1 vs 6); on decode the running mode decides (default v6, `--legacy-ids` pure v1). v6 is v1 **minus the Mersenne Twister**: it reconstructs the compacted node with splitmix64 instead of `std::mt19937`, stores the timestamp as milliseconds since a 2026 epoch, and yields a UUIDv6 canonical form. Its win is **speed**, roughly **50x faster decode** (~12 ns vs ~620 ns, paid on every read), plus a cleaner, no-Mersenne-Twister port in every language. Raw-wire size and index sortability are **the same as v1** (v1's compact wire already sorts), so v6 is a faster, cleaner version of the same idea, not a smaller one. New ids are minted v6 by default; old v1 ids still resolve by their bytes, at the cost of a documented change to how their canonical form renders (see `upgrade.md`).
 
 ## Why v6 (the honest value)
 
 The measurements from `prototype/` and `COMPARISON.md`, stated without inflation:
 
-- **Decode speed (the prize).** v1 runs `std::mt19937` in `calculate_node()` on every decode of a compacted id: **~843 to 1043 ns** with a full engine, about 590 ns with the partial expander v1 uses (see [CHANGELOG.md](../CHANGELOG.md)). v6's splitmix64 does the same job in **~7 ns**. For a search engine that reads billions of ids, that is the real saving: CPU, latency, cost, on every read.
+- **Decode speed (the prize).** v1 derives the node from `std::mt19937(seed)` in `calculate_node()` on every decode of a compacted id: **~620 ns** with the partial expander v1 uses (a full engine takes ~930 ns). v6's splitmix64 does the same job in ~2 ns, and a whole v6 decode takes **~12 ns** (Apple M4 Pro, see [COMPARISON.md](COMPARISON.md)). For a search engine that reads billions of ids, that is the real saving: CPU, latency, cost, on every read.
 - **Portability.** splitmix64 is fixed-width integer arithmetic, identical across C++/Python/JS by construction, so every port drops its hand-rolled Mersenne Twister (`contrib/python/cuuid/mertwis.py`) for four lines.
 - **Cleaner semantics.** Milliseconds instead of 100 ns ticks, no XOR fold, no clock scrambling; a clean 1 ms sort granularity rather than v1's scrambled 1.64 ms floor.
 - **Marginal size.** v6 is a 4-byte payload for about a year near its 2026 epoch, and stays 8 bytes where v1 slowly creeps to 9 past ~2100.
@@ -73,7 +73,7 @@ They are outside the generated space (version nibbles 0 and F, never 1 or 6), re
 ## What carries over unchanged from the prototype
 
 The prototype (`prototype/`) already validated the load-bearing parts, and v6 inherits them verbatim:
-- splitmix64 node reconstruction (encode/decode ~10 ns).
+- splitmix64 node reconstruction (encode ~11 ns, decode ~12 ns).
 - Millisecond-since-2026 timestamp and the size schedule.
 - v6 canonical sortability and the ~1 ms wire sort floor.
 - The collision model (within-node clock counter; cross-node 48-bit node expanded / 7-bit hashed salt compact).

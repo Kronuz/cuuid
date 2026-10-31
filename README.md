@@ -18,7 +18,7 @@ same as a 64-bit Snowflake.
   always available.
 - 🔢 **Sorts by creation time** in its condensed form, as a database key.
 - ⚡ **v6, the default**: UUIDv6 layout and splitmix64 node reconstruction, about
-  9 ns to encode and 12 ns to decode.
+  11 ns to encode and 12 ns to decode.
 - 🧊 **v1, frozen**: Xapiand's original codec, byte for byte, for existing data
   (`Codec::v1`).
 - 🔍 **Validators and accessors**: `is_valid()`, `is_serialised()`, and the v1 node,
@@ -77,16 +77,30 @@ A host can replace three seams by defining a header before the build:
 
 ## ⚡ Performance
 
-v6 encodes in about 9 ns and decodes in about 12 ns (release build, see
-[docs/COMPARISON.md](docs/COMPARISON.md)). A compact v1 id needs the first two outputs of
-`std::mt19937(seed)`; `expand_mt_compute` computes only the 399 state words those
-depend on, and a small thread-local cache serves repeated work on one id. On an
-Apple M4 Pro, v1 `serialise` of a new id takes about 590 ns and of a repeated id
-about 9 ns. Run the v1 benchmark with:
+Apple M4 Pro, Apple clang 17 with `-O3 -DNDEBUG -std=gnu++20`, measured under
+`quiet strict` at `d03d8d1`. Each figure is ns per call, the best of 7 batches of 20,000
+calls over 4,096 distinct ids:
+
+| Operation | v6 | v1 |
+|---|---:|---:|
+| `serialise` | 11 | 618 |
+| `unserialise` | 12 | 621 |
+| `generate` (compact) | 91 | 667 |
+
+A compact v1 id needs the first two outputs of `std::mt19937(seed)`.
+`expand_mt_compute` computes only the 399 state words those depend on, and a small
+thread-local cache serves repeated work on one id: a repeated v1 `serialise` takes
+10 ns and `unserialise` 11 ns. A bare `std::mt19937(seed)` with two draws takes 919 ns.
+v6 reconstructs the node with splitmix64 instead.
 
 ```sh
 cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build && ./build/cuuid_v1_bench
 ```
+
+`cuuid_v1_bench` prints the v1 rows and the v6 `generate` row. The v6 `serialise` and
+`unserialise` rows are the same loop with `Codec::v6`.
+[docs/COMPARISON.md](docs/COMPARISON.md) sets the codec against Snowflake, UUIDv6,
+UUIDv7, and ULID.
 
 ## 📚 Documentation
 

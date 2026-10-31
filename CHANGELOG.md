@@ -3,6 +3,31 @@
 Notable changes to `cuuid`, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2026-10-31
+
+### Documentation
+
+- The timings in `README.md`, `docs/COMPARISON.md` and `docs/CUUID_V6.md` are measured
+  on an Apple M4 Pro (Apple clang 17, `-O3`) at `d03d8d1`, after the v1 node
+  expander below. The figures they replace were measured on an unrecorded M-series Mac
+  with the full `std::mt19937` engine:
+
+  | Figure | Before | Now |
+  | --- | --- | --- |
+  | v1 compact `generate` / `serialise` / `parse` | 953 / 883 / 904 ns | 682 / 621 / 624 ns |
+  | v1 no-compact `generate` / `serialise` / `parse` | 91 / 823 / 9.7 ns | 91 / 621 / 11 ns |
+  | UUIDv7 `generate` / `serialise` / `parse` | 4.5 / 0.7 / 0.4 ns | 4.9 / 0.8 / 0.4 ns |
+  | UUIDv6, ULID `generate` | 0.3, 4.7 ns | 1.1, 5.0 ns |
+  | Snowflake `generate` / `serialise` / `parse` | 0.7 / 1.1 / 2.2 ns | 0.7 / 1.0 / 2.8 ns |
+  | v1 encode / decode in the `cuuid_v2_demo` table | 880 / 850 ns | 620 / 620 ns |
+  | v6 encode / decode | 9 / 12 ns (7 and 16 ns decode in two places) | 11 / 12 ns |
+  | v2 prototype encode / decode | 12 / 8 ns | 9 / 5 ns |
+  | v1 decode in `docs/CUUID_V6.md` | 843 to 1043 ns | 620 ns |
+  | v6 decode speedup over v1 | 70 to 120x | about 50x |
+
+  The v6 `serialise` and `unserialise` figures come from a scratch loop over 4,096
+  distinct ids with `Codec::v6`; `cuuid_v1_bench` times only v1 and v6 `generate`.
+
 ## 2026-10-30
 
 ### Changed
