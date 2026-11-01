@@ -86,8 +86,15 @@ Not for:
 
 ## ⚡ Performance
 
-ns per call, one thread, best of seven batches over 4,096 distinct ids, Apple clang 17 with `-O3`,
-against Boost.UUID 1.92:
+ns per call, one thread, best of seven batches over 4,096 distinct ids, Apple clang 17 with `-O3`, on an
+Apple M4 Pro (macOS 26, arm64) and an Intel Core i9-9980HK (macOS 15, x86-64). The comparator is
+[Boost.UUID](https://www.boost.org/doc/libs/1_92_0/libs/uuid/) 1.92.0 (Homebrew),
+and `cuuid_compare` checks that both libraries read the same bytes and print the same text before
+it times them. Rows are the call: *parse* reads the 36-character form (`UUID{string_view}` against
+`string_generator`), `to_string` writes it, and *generate* mints one id: *v6* is cuuid's default
+time-ordered mint, compared with Boost's `random_generator` (random, unordered) and `time_generator_v7`
+(time-ordered, the closer match); *v1 compact* is the original codec's mint, which has no Boost
+counterpart and is compared with `random_generator` only for scale.
 
 | Operation | cuuid, Apple M4 Pro | Boost.UUID, Apple M4 Pro | cuuid, Intel Core i9-9980HK | Boost.UUID, Intel Core i9-9980HK |
 | :-- | --: | --: | --: | --: |
@@ -107,9 +114,9 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release -DCUUID_BENCH_BOOST=ON && cmake --buil
 ./build/cuuid_v1_bench
 ```
 
-`cuuid_compare` checks that both libraries read and print the same text before it times them;
-CMake finds Boost when it is installed and links it to that target only. `cuuid_v1_bench` prints
-the v1 rows and the v6 `generate` row; the v6 codec rows are the same loop with `Codec::v6`.
+CMake finds Boost when it is installed (it is never fetched) and links it to `cuuid_compare` only;
+the version it found is in the benchmark's output. `cuuid_v1_bench` prints the v1 rows and the v6
+`generate` row; the v6 codec rows are the same loop with `Codec::v6`.
 [docs/COMPARISON.md](docs/COMPARISON.md) sets the codec against Snowflake, UUIDv6, UUIDv7 and
 ULID.
 
