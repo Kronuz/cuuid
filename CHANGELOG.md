@@ -5,7 +5,46 @@ Notable changes to `cuuid`, newest first. The format follows
 
 ## 2026-10-31
 
+### Changed
+
+- v6 `generate()` claims its time under a mutex again, as before 2026-10-30; the
+  CAS of that day is reverted. `generate()` was never lock-free:
+  `UUIDGenerator::operator()` takes a static mutex for every mint, and
+  `UUIDGenerator::newUUID()` takes another on macOS, before the claim runs. The CAS
+  made no measurable difference: the one-thread `generate` is 90.9 ns either
+  way (the platform mint's 100 ns tick), and the per-thread wall time per id at 2, 4
+  and 8 threads is inside the run-to-run spread, about 30%. The code is the code
+  before the CAS.
+
+### Added
+
+- `test/test_v6_threads.cc` (`cuuid_v6_threads`): 8 threads each mint 4,000 v6 ids
+  with `generate()`. Every id and every condensed wire is distinct, each id round-trips,
+  and the claimed 100 ns time of every id (recovered by undoing the compaction)
+  is unique across threads and strictly increasing within each thread. It passes
+  under ThreadSanitizer. Mutants: a claim that reuses the last time fails it in
+  6 runs of 6, and a claim without the lock fails it in 3 of 6 runs and every
+  time under TSan; neither failed any earlier test. A claim step that is removed
+  altogether passes, because `UUIDGenerator::operator()` already hands out unique,
+  strictly increasing times; the step is redundant on platforms whose mint is a
+  version 1 UUID.
+- `test_v6_canonical_order` in `test/test_v6.cc`: the canonical v6 bytes of `make()` ids are in time order
+  across 1.64 ms windows, and distinct inside them. A consistent swap of two time
+  bytes in the layout, which keeps the wire sorted, fails only this test.
+
 ### Documentation
+
+- The canonical v6 bytes sort by time at a granularity of 2^14 x 100 ns = 1.64 ms,
+  not 1 ms. `make()` and `generate()` compact the id, which clears the low 14 bits of
+  the time and folds them into the clock field with an XOR of the clock sequence, so
+  ids from different windows are in time order and ids inside one window are
+  distinct but not in creation order. For 100,000 ids from one thread, 33% to 58%
+  of consecutive ids sort below their predecessor on Linux over three runs
+  (55% and 97% in the audit; the rate depends on the process clock sequence).
+  `docs/CUUID_V6.md` described the prototype's 1 ms, no-fold layout as the
+  shipped one; it and the `cuuid_v6` comments now state the shipped granularity. A
+  finer canonical order would need ids that are not compacted, whose wire is the
+  16-byte full form, so it is a design decision.
 
 - The timings in `README.md`, `docs/COMPARISON.md` and `docs/CUUID_V6.md` are measured
   on an Apple M4 Pro (Apple clang 17, `-O3`) at `d03d8d1`, after the v1 node

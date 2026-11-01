@@ -26,7 +26,9 @@
 //   1. the compacted node is reconstructed with splitmix64 instead of std::mt19937, so a
 //      read never pays a Mersenne Twister construction; and
 //   2. the 16-byte value is laid out in RFC-9562 UUIDv6 order (version 6, timestamp first),
-//      so the canonical form is byte-sortable by time.
+//      so the canonical bytes of ids made by make() and generate() sort by time at the
+//      granularity of the compaction, 2^14 ticks of 100 ns (1.64 ms). Ids inside one such
+//      window are distinct but their byte order is not their creation order.
 // The wire framing, bit layout, salt derivation, and time base are all shared with v1.
 
 #pragma once

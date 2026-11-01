@@ -88,6 +88,37 @@ static void test_v6_sortable() {
 	}
 }
 
+// The canonical v6 bytes sort by time at the granularity of the compaction: 2^14 ticks of
+// 100 ns (1.64 ms). make() folds the low 14 bits of the time into the clock field (XOR the
+// clock sequence), so ids from different windows are in time order, and ids inside one window
+// are distinct, decode exactly, and carry their own time, but the order of their bytes is not
+// the order of their times.
+static void test_v6_canonical_order() {
+	const uint64_t window = 1ULL << 14;
+	const uint64_t initial = 0x01b21dd213814000ULL + (2016 - 1970) * 0x00011f0241243c00ULL;
+	// Steps below, at and above the window; the clock and node are fixed, as for ids minted by one process.
+	const uint64_t steps[] = {1, 100, 10000, window - 1, window, window + 1, 5 * window, 2098769};
+	for (uint64_t step : steps) {
+		std::array<unsigned char, 16> prev_bytes{};
+		uint64_t prev_window = 0;
+		std::set<std::array<unsigned char, 16>> seen;
+		const uint64_t base = initial + (next_rand() % (1ULL << 40));
+		for (int i = 0; i < 20000; ++i) {
+			const uint64_t time = base + static_cast<uint64_t>(i) * step;
+			const UUID uuid = cuuid_v6::make(time, 0x1abc, 0x0123456789abULL);
+			const auto bytes = uuid.get_bytes();
+			const uint64_t w = (time - initial) >> 14;
+			if (i != 0 && w != prev_window) {
+				CHECK(prev_bytes < bytes);  // different windows: in time order
+			}
+			CHECK(seen.insert(bytes).second);  // distinct inside and across windows
+			CHECK(cuuid_v6::unserialise(cuuid_v6::serialise(uuid)) == uuid);
+			prev_bytes = bytes;
+			prev_window = w;
+		}
+	}
+}
+
 // The generator mints distinct, well-formed, round-tripping v6 UUIDs.
 static void test_v6_generator() {
 	const int N = 2000;
@@ -131,6 +162,7 @@ int main() {
 	test_v6_round_trip();
 	test_v6_expanded_round_trip();
 	test_v6_sortable();
+	test_v6_canonical_order();
 	test_v6_generator();
 	test_dispatch();
 

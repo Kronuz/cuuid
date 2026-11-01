@@ -84,6 +84,11 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 	target_link_libraries(cuuid_mt_test PRIVATE cuuid)
 	add_test(NAME cuuid_mt COMMAND cuuid_mt_test)
 
+	find_package(Threads REQUIRED)
+	add_executable(cuuid_v6_threads_test test/test_v6_threads.cc)
+	target_link_libraries(cuuid_v6_threads_test PRIVATE cuuid Threads::Threads)
+	add_test(NAME cuuid_v6_threads COMMAND cuuid_v6_threads_test)
+
 	add_executable(cuuid_demo examples/demo.cc)
 	target_link_libraries(cuuid_demo PRIVATE cuuid)
 

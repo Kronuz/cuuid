@@ -14,7 +14,7 @@ The measurements from `prototype/` and `COMPARISON.md`, stated without inflation
 
 - **Decode speed (the prize).** v1 derives the node from `std::mt19937(seed)` in `calculate_node()` on every decode of a compacted id: **~620 ns** with the partial expander v1 uses (a full engine takes ~930 ns). v6's splitmix64 does the same job in ~2 ns, and a whole v6 decode takes **~12 ns** (Apple M4 Pro, see [COMPARISON.md](COMPARISON.md)). For a search engine that reads billions of ids, that is the real saving: CPU, latency, cost, on every read.
 - **Portability.** splitmix64 is fixed-width integer arithmetic, identical across C++/Python/JS by construction, so every port drops its hand-rolled Mersenne Twister (`contrib/python/cuuid/mertwis.py`) for four lines.
-- **Cleaner semantics.** Milliseconds instead of 100 ns ticks, no XOR fold, no clock scrambling; a clean 1 ms sort granularity rather than v1's scrambled 1.64 ms floor.
+- **Cleaner layout.** The canonical form is RFC 9562 UUIDv6, timestamp first, so its bytes sort by time. The C++ codec shares v1's compaction, which folds the low 14 bits of the 100 ns timestamp into the clock field with an XOR, so the canonical bytes of `make()` and `generate()` ids sort at a granularity of 2^14 x 100 ns = 1.64 ms: ids from different windows are in time order, and ids inside one window are distinct but not in creation order. The prototype in `prototype/` stores milliseconds with no fold, which sorts to 1 ms.
 - **Marginal size.** v6 is a 4-byte payload for about a year near its 2026 epoch, and stays 8 bytes where v1 slowly creeps to 9 past ~2100.
 
 What v6 is **not**: it is not smaller on the raw wire at steady state (both hit the ~8-byte entropy floor), and it does not improve stored sortability, because **v1's compact wire already sorts by time** (measured 1.0000) and front-codes the same. Only v1's canonical 16-byte form fails to sort, and Xapiand stores the compact wire, not the canonical. So the pitch is speed and cleanliness with size held constant.
@@ -75,7 +75,7 @@ They are outside the generated space (version nibbles 0 and F, never 1 or 6), re
 The prototype (`prototype/`) already validated the load-bearing parts, and v6 inherits them verbatim:
 - splitmix64 node reconstruction (encode ~11 ns, decode ~12 ns).
 - Millisecond-since-2026 timestamp and the size schedule.
-- v6 canonical sortability and the ~1 ms wire sort floor.
+- v6 canonical sortability (1.64 ms granularity in the C++ codec, 1 ms in the prototype's wire).
 - The collision model (within-node clock counter; cross-node 48-bit node expanded / 7-bit hashed salt compact).
 - Cross-language byte-identical C++/Python/JS (the ports and `cross_validate.sh`).
 
