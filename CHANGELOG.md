@@ -63,7 +63,7 @@ Notable changes to `cuuid`, newest first. The format follows
   ids from different windows are in time order and ids inside one window are
   distinct but not in creation order. For 100,000 ids from one thread, 33% to 58%
   of consecutive ids sort below their predecessor on Linux over three runs
-  (55% and 97% in the audit; the rate depends on the process clock sequence).
+  (55% and 97% in two other runs; the rate depends on the process clock sequence).
   `docs/CUUID_V6.md` described the prototype's 1 ms, no-fold layout as the
   shipped one; it and the `cuuid_v6` comments now state the shipped granularity. A
   finer canonical order needs the exact time in the id, which the compact wire
