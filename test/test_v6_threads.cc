@@ -1,7 +1,7 @@
 // cuuid_v6::generate() under threads.
 //
 // T threads each mint M ids at once. The platform mint is serialised inside UUIDGenerator, and
-// generate() then claims max(time, last + 1) for each id under its own lock, so:
+// generate() then claims max(time, last + 1) for each id with a CAS, so:
 //   - every id (its 16 bytes) and every condensed wire is distinct across all threads;
 //   - the claimed 100 ns time of every id is unique across all threads and strictly increasing
 //     within each thread;

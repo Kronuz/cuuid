@@ -114,7 +114,7 @@ Below its time resolution, a scheme keeps order only if it has a monotone tie-br
 - **Read-heavy workloads.** Every decode of a compacted **v1** id derives its node from `std::mt19937(seed)` (~620 ns). At millions of reads per second that is real CPU and real money. (The **v6** format removes this: splitmix64 reconstruction decodes in ~12 ns.)
 - **Sub-millisecond ordering.** Anything needing strict order at finer than ~1.64 ms will not get it from the condensed wire.
 - **Non-v1 UUIDs.** A v4 (random) UUID has no compressible structure, so cuuid falls back to the full 17-byte form (tag + 16 bytes), which is **larger** than a raw 16-byte UUID. The compression is a v1/v6-only trick.
-- **Canonical-form sortability and privacy.** If a consumer sorts or indexes the canonical 16 bytes rather than the wire, **v1** gives non-sortability and a MAC-address leak. (The **v6** format fixes the sortability: its canonical bytes are UUIDv6, time-ordered; the node is still a synthetic, salted value, not a MAC.)
+- **Canonical-form sortability and privacy.** If a consumer sorts or indexes the canonical 16 bytes rather than the wire, **v1** gives non-sortability and a MAC-address leak. (The **v6** format fixes the sortability: its canonical bytes are UUIDv6, time-ordered at the 1.64 ms compaction window; the node is still a synthetic, salted value, not a MAC.)
 
 Nothing here is a correctness bug. These are the honest edges of a design that traded CPU and a custom format for bytes on disk.
 

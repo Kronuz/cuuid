@@ -7,14 +7,27 @@ Notable changes to `cuuid`, newest first. The format follows
 
 ### Changed
 
-- v6 `generate()` claims its time under a mutex again, as before 2026-10-30; the
-  CAS of that day is reverted. `generate()` was never lock-free:
-  `UUIDGenerator::operator()` takes a static mutex for every mint, and
-  `UUIDGenerator::newUUID()` takes another on macOS, before the claim runs. The CAS
-  made no measurable difference: the one-thread `generate` is 90.9 ns either
-  way (the platform mint's 100 ns tick), and the per-thread wall time per id at 2, 4
-  and 8 threads is inside the run-to-run spread, about 30%. The code is the code
-  before the CAS.
+- The v6 `generate()` claim stays a CAS, and the "lock-free" description is
+  corrected. `generate()` is not lock-free: `UUIDGenerator::operator()` takes a
+  static mutex for every mint, and `UUIDGenerator::newUUID()` takes another on
+  macOS, before the claim runs. What the CAS removes is the claim's own mutex
+  acquire, about 10 ns per call on x86. Measured with alternating runs of
+  `cuuid_v1_bench` and a threaded loop (median of rounds; three on the M4, five
+  on the i9), the mutex against the CAS:
+
+  | Row | Apple M4 Pro | Intel i9-9980HK |
+  | --- | ---: | ---: |
+  | `v6 generate`, `cuuid_v1_bench` | 90.9 and 90.9 ns | 109.6 and 99.9 ns |
+  | `v6 generate`, 1 thread | 90.9 and 90.9 ns | 107.1 and 97.7 ns |
+  | per thread, 2 threads | 239 and 214 ns | 525 and 484 ns |
+  | per thread, 4 threads | 633 and 715 ns | 1307 and 1199 ns |
+  | per thread, 8 threads | 1566 and 1496 ns | 3412 and 3315 ns |
+  | `v1 generate (no compact)`, unchanged code | 90.9 and 90.9 ns | 90.9 and 90.9 ns |
+
+  On the M4 the platform mint sets the floor and the two are the same; the threaded rows
+  move in both directions with spreads up to 8%. On the i9 the mutex is 8 to 10% slower
+  with one to four threads and the 8-thread rows are inside their 15 to 30% spread. The
+  CAS is kept for that.
 
 ### Added
 
@@ -22,15 +35,14 @@ Notable changes to `cuuid`, newest first. The format follows
   with `generate()`. Every id and every condensed wire is distinct, each id round-trips,
   and the claimed 100 ns time of every id (recovered by undoing the compaction)
   is unique across threads and strictly increasing within each thread. It passes
-  under ThreadSanitizer. Mutants: a claim that reuses the last time fails it in
-  6 runs of 6, and a claim without the lock fails it in 3 of 6 runs and every
-  time under TSan; neither failed any earlier test. A claim step that is removed
-  altogether passes, because `UUIDGenerator::operator()` already hands out unique,
-  strictly increasing times; the step is redundant on platforms whose mint is a
-  version 1 UUID.
+  under ThreadSanitizer. Mutants: a claim that reuses the last time and a claim that
+  stores instead of compare-exchanging each fail it in 6 runs of 6; neither failed any
+  earlier test. A claim step that is removed altogether passes, because
+  `UUIDGenerator::operator()` already hands out unique, strictly increasing times; the
+  step is redundant on platforms whose mint is a version 1 UUID.
 - `test_v6_canonical_order` in `test/test_v6.cc`: the canonical v6 bytes of `make()` ids are in time order
   across 1.64 ms windows, and distinct inside them. A consistent swap of two time
-  bytes in the layout, which keeps the wire sorted, fails only this test.
+  bytes in the layout, which keeps the wire sorted, fails this test and none of the earlier ones.
 
 ### Documentation
 
@@ -43,8 +55,10 @@ Notable changes to `cuuid`, newest first. The format follows
   (55% and 97% in the audit; the rate depends on the process clock sequence).
   `docs/CUUID_V6.md` described the prototype's 1 ms, no-fold layout as the
   shipped one; it and the `cuuid_v6` comments now state the shipped granularity. A
-  finer canonical order would need ids that are not compacted, whose wire is the
-  16-byte full form, so it is a design decision.
+  finer canonical order needs the exact time in the id, which the compact wire
+  cannot carry (it keeps the low 14 bits of the time only XORed into the clock), so
+  such ids would serialise in the expanded form, up to 17 bytes instead of about 8:
+  a design decision.
 
 - The timings in `README.md`, `docs/COMPARISON.md` and `docs/CUUID_V6.md` are measured
   on an Apple M4 Pro (Apple clang 17, `-O3`) at `d03d8d1`, after the v1 node
