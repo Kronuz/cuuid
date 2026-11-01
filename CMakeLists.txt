@@ -10,8 +10,8 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # --- Dependencies (the Kronuz family, pinned by commit) ---
-FetchContent_Declare(endian        GIT_REPOSITORY https://github.com/Kronuz/endian.git        GIT_TAG f6269f09da90bb3713018792003f01a67749b00c)
-FetchContent_Declare(char_classify GIT_REPOSITORY https://github.com/Kronuz/char-classify.git GIT_TAG a8904965dc904690ddd6875ab7acbfd271d97832)
+FetchContent_Declare(endian        GIT_REPOSITORY https://github.com/Kronuz/endian.git        GIT_TAG 8db745f5ccbf9b5c176bec27f900d64cf105c4c0)
+FetchContent_Declare(char_classify GIT_REPOSITORY https://github.com/Kronuz/char-classify.git GIT_TAG 65c1ff5c4052d9108ea7630bc4327be236ec1bd8)
 FetchContent_MakeAvailable(endian char_classify)
 
 # --- Library target ---
