@@ -102,6 +102,23 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build && ./build/cuui
 [docs/COMPARISON.md](docs/COMPARISON.md) sets the codec against Snowflake, UUIDv6,
 UUIDv7, and ULID.
 
+`cuuid_compare` also times the 36-character text form and generation against
+Boost.UUID, found by CMake when installed and linked by that target only. It checks that
+both libraries read and print the same text before timing. ns per call, one thread, best of
+two runs of seven batches over 4,096 distinct ids, Apple clang 17 with `-O3`, Boost 1.92:
+
+| Operation | cuuid, Apple M4 Pro | Boost.UUID | cuuid, Intel i9-9980HK | Boost.UUID |
+| :-- | --: | --: | --: | --: |
+| parse the text form | 8.0 | 70.6 | 23.8 | 169.8 |
+| `to_string` | 27.5 | 23.0 | 69.1 | 48.7 |
+| generate, v6 | 90.9 | 13.7 (`random_generator`), 27.4 (`time_generator_v7`) | 117.1 | 17.8, 45.1 |
+| generate, v1 compact | 650 | 13.7 | 788 | 17.8 |
+
+cuuid parses the text form 9x faster on the M4 Pro and 7x on the i9. It prints it 1.2x and
+1.4x slower, and generates v6 ids 2.6x to 6.6x slower and compact v1 ids 44x to 47x slower: a v6
+id takes the platform's v1 mint, and a compact v1 id also expands its node (see above). Build with
+`cmake -B build -DCMAKE_BUILD_TYPE=Release -DCUUID_BENCH_BOOST=ON` and run `./build/cuuid_compare`.
+
 ## 📚 Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): the condenser and the wire format.

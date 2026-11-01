@@ -3,6 +3,17 @@
 Notable changes to `cuuid`, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2026-11-01
+
+### Added
+
+- `cuuid_compare` adds section H, built with `-DCUUID_BENCH_BOOST=ON` (Boost is found, never
+  fetched): the 36-character text form and generation against Boost.UUID 1.92 on an Apple M4 Pro
+  and an Intel i9-9980HK. It checks that both libraries agree on the text form first. cuuid
+  parses the text 9x (M4 Pro) and 7x (i9) faster, prints it 1.2x and 1.4x slower, and
+  generates v6 ids 2.6x to 6.6x slower than Boost's `time_generator_v7` and `random_generator`.
+  The README has the table.
+
 ## 2026-10-31
 
 ### Changed

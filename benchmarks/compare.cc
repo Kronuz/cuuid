@@ -8,9 +8,19 @@
 //   E. byte-sortability (does lexicographic wire order match creation order?)
 //
 // UUIDv7 (RFC 9562) and a Twitter-style Snowflake are implemented inline so the
-// benchmark is self-contained; cuuid is the real library.
+// benchmark is self-contained; cuuid is the real library. With CUUID_BENCH_BOOST
+// (cmake -DCUUID_BENCH_BOOST=ON) section H adds Boost.UUID: text parse, text form and
+// generation.
 
 #include "cuuid_v1.hh"
+
+#ifdef CUUID_BENCH_BOOST
+#include <boost/uuid/uuid.hpp>
+#include <boost/uuid/uuid_generators.hpp>
+#include <boost/uuid/uuid_io.hpp>
+#include <boost/version.hpp>
+#include "cuuid_v6.hh"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -396,6 +406,66 @@ int main() {
 		std::printf("   splitmix64   (hypothetical v2)      %8.1f\n", ns_per(t2 - t1, M));
 		std::printf("   (sink=%llu)\n", static_cast<unsigned long long>(sink));
 	}
+
+#ifdef CUUID_BENCH_BOOST
+	// ---------- H. Text form and generation against Boost.UUID ----------
+	{
+		// 4096 distinct UUID strings, parsed and printed in rotation. Each row first checks that the
+		// two libraries agree; a row where they differ is void.
+		boost::uuids::random_generator bgen;
+		std::vector<std::string> text;
+		std::vector<UUID> mine;
+		std::vector<boost::uuids::uuid> theirs;
+		for (int i = 0; i < 4096; ++i) {
+			theirs.push_back(bgen());
+			text.push_back(boost::uuids::to_string(theirs.back()));
+			mine.emplace_back(std::string_view(text.back()));
+		}
+		bool same = true;
+		for (std::size_t i = 0; i < text.size(); ++i) {
+			same &= std::memcmp(mine[i].get_bytes().data(), theirs[i].data, 16) == 0;
+			same &= mine[i].to_string() == text[i];
+			same &= boost::uuids::string_generator()(text[i]) == theirs[i];
+		}
+		if (!same) {
+			std::printf("H. cuuid and Boost.UUID disagree on the text form\n");
+			return 1;
+		}
+
+		auto best = [&](auto f) {
+			double b = 1e30;
+			for (int rep = 0; rep < 7; ++rep) {
+				auto t0 = clk::now();
+				f();
+				b = std::min(b, ns_per(clk::now() - t0, text.size()));
+			}
+			return b;
+		};
+		// Passing an object's address to an empty asm forces the whole value to be built, so a
+		// comparator cannot skip the work for the bytes the loop does not read.
+		auto escape = [](const void* p) { asm volatile("" : : "r"(p) : "memory"); };
+		const double parse_mine = best([&] { for (const auto& s : text) { UUID u{std::string_view(s)}; escape(&u); } });
+		const double parse_boost = best([&] { for (const auto& s : text) { auto u = boost::uuids::string_generator()(s); escape(&u); } });
+		const double print_mine = best([&] { for (const auto& u : mine) { auto t = u.to_string(); escape(t.data()); } });
+		const double print_boost = best([&] { for (const auto& u : theirs) { auto t = boost::uuids::to_string(u); escape(t.data()); } });
+		UUIDGenerator g;
+		const double gen_v1 = best([&] { for (std::size_t i = 0; i < text.size(); ++i) { auto u = g(true); escape(&u); } });
+		const double gen_v6 = best([&] { for (std::size_t i = 0; i < text.size(); ++i) { auto u = cuuid_v6::generate(); escape(&u); } });
+		const double gen_boost = best([&] { for (std::size_t i = 0; i < text.size(); ++i) { auto u = bgen(); escape(&u); } });
+
+		std::printf("H. cuuid against Boost.UUID %s (ns/op, best of 7; the text forms agree)\n", BOOST_LIB_VERSION);
+		std::printf("   parse 36-char text   cuuid %7.1f  Boost string_generator   %7.1f  (%.2fx)\n", parse_mine, parse_boost, parse_mine / parse_boost);
+		std::printf("   to_string            cuuid %7.1f  Boost to_string          %7.1f  (%.2fx)\n", print_mine, print_boost, print_mine / print_boost);
+		std::printf("   generate v1 compact  cuuid %7.1f  Boost random_generator   %7.1f  (%.2fx)\n", gen_v1, gen_boost, gen_v1 / gen_boost);
+		std::printf("   generate v6          cuuid %7.1f  Boost random_generator   %7.1f  (%.2fx)\n", gen_v6, gen_boost, gen_v6 / gen_boost);
+#if BOOST_VERSION >= 108600
+		boost::uuids::time_generator_v7 v7gen;
+		const double gen_v7 = best([&] { for (std::size_t i = 0; i < text.size(); ++i) { auto u = v7gen(); escape(&u); } });
+		std::printf("   generate v6          cuuid %7.1f  Boost time_generator_v7  %7.1f  (%.2fx)\n", gen_v6, gen_v7, gen_v6 / gen_v7);
+#endif
+		std::printf("\n");
+	}
+#endif
 
 	return 0;
 }

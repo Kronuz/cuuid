@@ -101,6 +101,24 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 	add_executable(cuuid_compare benchmarks/compare.cc)
 	target_link_libraries(cuuid_compare PRIVATE cuuid)
 
+	# Boost.UUID rows in cuuid_compare (text parse, text form, generation):
+	#   cmake -B build -DCMAKE_BUILD_TYPE=Release -DCUUID_BENCH_BOOST=ON
+	# Boost is found on the system and linked by this target only; its headers are enough.
+	option(CUUID_BENCH_BOOST "Add Boost.UUID rows to cuuid_compare" OFF)
+	if(CUUID_BENCH_BOOST)
+		find_package(Boost QUIET)
+		if(Boost_FOUND)
+			if(TARGET Boost::headers)
+				target_link_libraries(cuuid_compare PRIVATE Boost::headers)
+			else()
+				target_include_directories(cuuid_compare PRIVATE ${Boost_INCLUDE_DIRS})
+			endif()
+			target_compile_definitions(cuuid_compare PRIVATE CUUID_BENCH_BOOST)
+		else()
+			message(WARNING "cuuid_compare: Boost not found, the Boost.UUID rows are skipped")
+		endif()
+	endif()
+
 	add_executable(cuuid_v2_demo prototype/v2_demo.cc)
 	target_link_libraries(cuuid_v2_demo PRIVATE cuuid)
 endif()

@@ -26,7 +26,7 @@ test/test_v6.cc                 ctest coverage for v6 round-trips, UUIDv6 layout
 test/test_v6_threads.cc         ctest `cuuid_v6_threads`: 8 threads x 4000 `cuuid_v6::generate()` ids are distinct, with unique claimed times that increase within each thread; run under TSan.
 benchmarks/serialise_parse.cc   Small serialise/parse throughput harness.
 benchmarks/v1_bench.cc          v1 serialise/unserialise/generate ns per op (cuuid_v1_bench).
-benchmarks/compare.cc           cuuid against Snowflake, UUIDv6, UUIDv7, ULID (cuuid_compare).
+benchmarks/compare.cc           cuuid against Snowflake, UUIDv6, UUIDv7, ULID (cuuid_compare); with -DCUUID_BENCH_BOOST=ON also Boost.UUID text parse, text form and generation (Boost is found, never fetched).
 prototype/                      v6 prototypes, Python/JS ports, cross-validation; v2_demo.cc builds as cuuid_v2_demo.
 docs/COMPARISON.md, CUUID_V6.md, MIGRATION.md
                                 Comparison, the v6 format, and the v6 rollout plan.
