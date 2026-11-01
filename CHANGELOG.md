@@ -7,6 +7,7 @@ Notable changes to `cuuid`, newest first. The format follows
 
 ### Added
 
+- `cuuid_v1_bench v6` runs its serialise, unserialise and generate rows with `Codec::v6`.
 - `cuuid_compare` adds section H, built with `-DCUUID_BENCH_BOOST=ON` (Boost is found, never
   fetched): the 36-character text form and generation against Boost.UUID 1.92 on an Apple M4 Pro
   and an Intel i9-9980HK. It checks that both libraries agree on the text form first. cuuid
