@@ -8,7 +8,7 @@
 
 `cuuid` is not an ID-generation scheme in the sense Snowflake or UUIDv7 are. It generates a plain **RFC 4122 version-1** UUID (via `uuid_generate_time`) and adds one distinctive thing on top: a **condensed, variable-length wire codec**. That codec is where all the interest, and all the argument, lives.
 
-Timings are from an Apple M4 Pro, Apple clang 17 with `-O3 -DNDEBUG`, measured under `quiet strict` at `d03d8d1` (`cuuid_compare` and `cuuid_v1_bench`). The v1 codec computes only the 399 `std::mt19937` state words the node needs, so a `serialise` of a new id takes about 620 ns and of a repeated id about 10 ns.
+Timings are from an Apple M4 Pro, Apple clang 17 with `-O3 -DNDEBUG`, measured on an otherwise idle machine at `d03d8d1` (`cuuid_compare` and `cuuid_v1_bench`). The v1 codec computes only the 399 `std::mt19937` state words the node needs, so a `serialise` of a new id takes about 620 ns and of a repeated id about 10 ns.
 
 - **Size.** A compacted cuuid is **8 bytes** for any present-day timestamp, the same as a 64-bit Snowflake and half of UUIDv7's 16, but without Snowflake's worker-id coordination. The often-quoted 4-byte figure is real only for timestamps within about a year of cuuid's 2016 epoch; the existing `serialise_parse` benchmark hits it because it feeds near-zero timestamps.
 - **Sortable? Yes.** The condensed wire puts time in the most-significant bits, so it sorts lexicographically by creation time, down to a **~1.64 ms** resolution floor. This is the answer to "can cuuid be sorted like Snowflake": on the wire, yes. In its **canonical 16-byte v1 form, no** (the classic v1 problem UUIDv6 exists to fix), which is exactly what the shipped **v6** format cures by storing the bytes in UUIDv6 order.
@@ -34,7 +34,7 @@ The one row that captures cuuid's whole personality is **wire size**: it is the 
 
 ## Benchmark results
 
-From `benchmarks/compare.cc` (N = 200k). Numbers are ns/op, the mean of two runs on an Apple M4 Pro, Apple clang 17 with `-O3 -DNDEBUG -std=gnu++20`, measured under `quiet strict` at `d03d8d1`. Reproduce with:
+From `benchmarks/compare.cc` (N = 200k). Numbers are ns/op, the mean of two runs on an Apple M4 Pro, Apple clang 17 with `-O3 -DNDEBUG -std=gnu++20`, measured on an otherwise idle machine at `d03d8d1`. Reproduce with:
 
 ```sh
 cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build && ./build/cuuid_compare
