@@ -23,7 +23,7 @@ billions of ids as small, sorted keys when you control both ends of the wire.
 - **v6, the default.** UUIDv6 byte order and splitmix64 node reconstruction: about 11 ns to
   encode and 12 ns to decode on an Apple M4 Pro.
 - **v1, frozen.** Xapiand's original codec, byte for byte, for existing data (`Codec::v1`).
-- **Fast text form.** Parses the 36-character form 7x to 9x faster than Boost.UUID.
+- **Fast text form.** Parses the 36-character form 7x to 8x faster than Boost.UUID.
 - **Validators and accessors.** `is_valid()`, `is_serialised()`, and the v1 node, time, clock
   sequence, variant and version fields.
 
@@ -81,7 +81,7 @@ Not for:
 - **Order below 1.64 ms.** Ids minted within that window can sort in any order.
 - **Wires of mixed codecs.** The condensed wire carries no version marker: decode with the codec
   that wrote it, `Codec::v6` by default or `Codec::v1` for data from the original codec.
-- **Fast generation.** A v6 id takes the platform's v1 mint, 2.6x to 6.6x slower than Boost.UUID's
+- **Fast generation.** A v6 id takes the platform's v1 mint, 2.7x to 6.9x slower than Boost.UUID's
   generators.
 
 ## ⚡ Performance
@@ -98,25 +98,26 @@ counterpart and is compared with `random_generator` only for scale.
 
 | Operation | cuuid, Apple M4 Pro | Boost.UUID, Apple M4 Pro | cuuid, Intel Core i9-9980HK | Boost.UUID, Intel Core i9-9980HK |
 | :-- | --: | --: | --: | --: |
-| parse the text form | 8.0 | 70.6 | 23.8 | 169.8 |
-| `to_string` | 27.5 | 23.0 | 69.1 | 48.7 |
-| generate, v6 | 90.9 | 13.7 (`random_generator`), 27.4 (`time_generator_v7`) | 117.1 | 17.8, 45.1 |
-| generate, v1 compact | 650 | 13.7 | 788 | 17.8 |
+| parse the text form | 8.1 | 65.6 | 20.4 | 152.5 |
+| `to_string` | 27.5 | 23.2 | 60.5 | 40.3 |
+| generate, v6 | 90.9 | 13.8 (`random_generator`), 26.8 (`time_generator_v7`) | 103.9 | 15.1, 39.0 |
+| generate, v1 compact | 665.8 | 13.8 | 692.3 | 15.1 |
 
 The condensed codec has no Boost counterpart. On the M4 Pro, v6 serializes in 11 ns and
-unserializes in 12 ns. v1 takes 618 and 621 ns, because a compact v1 id needs the first two
-outputs of `std::mt19937(seed)`; a thread-local cache serves repeated work on one id in 10 to
-11 ns.
+unserializes in 12 ns. v1 takes 604 and 610 ns, because a compact v1 id needs the first two
+outputs of `std::mt19937(seed)`; a thread-local cache serves repeated work on one id in 11 to
+12 ns.
 
 ```sh
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DCUUID_BENCH_BOOST=ON && cmake --build build
 ./build/cuuid_compare
 ./build/cuuid_v1_bench
+./build/cuuid_v1_bench v6
 ```
 
 CMake finds Boost when it is installed (it is never fetched) and links it to `cuuid_compare` only;
 the version it found is in the benchmark's output. `cuuid_v1_bench` prints the v1 rows and the v6
-`generate` row; the v6 codec rows are the same loop with `Codec::v6`.
+`generate` row, and `cuuid_v1_bench v6` the same loop with `Codec::v6`.
 [docs/COMPARISON.md](docs/COMPARISON.md) sets the codec against Snowflake, UUIDv6, UUIDv7 and
 ULID.
 
