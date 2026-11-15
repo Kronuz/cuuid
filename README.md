@@ -123,6 +123,8 @@ ULID.
 
 ## 📚 Documentation
 
+- [Packing a UUID](https://kronuz.github.io/blog/cuuid/):
+  the Familiars post on why it exists and how it works.
 - [ARCHITECTURE.md](ARCHITECTURE.md): the condenser, the wire format and the seams.
 - [docs/COMPARISON.md](docs/COMPARISON.md): against Snowflake, UUIDv6, UUIDv7 and ULID, with
   benchmarks.
