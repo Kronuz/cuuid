@@ -7,8 +7,8 @@
 int main() {
 	UUIDGenerator generator;
 	UUID uuid = generator();
-	std::string wire = uuid.serialise();
-	UUID round_trip = UUID::unserialise(wire);
+	std::string wire = uuid.serialize();
+	UUID round_trip = UUID::unserialize(wire);
 
 	std::cout << "uuid: " << uuid << '\n';
 	std::cout << "wire bytes: " << wire.size() << '\n';

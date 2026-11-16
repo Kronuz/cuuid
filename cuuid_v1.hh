@@ -84,32 +84,32 @@ public:
 		return is_valid(&pos, end);
 	}
 
-	static bool is_serialised(const char** ptr, const char* end);
-	static bool is_serialised(std::string_view bytes) {
+	static bool is_serialized(const char** ptr, const char* end);
+	static bool is_serialized(std::string_view bytes) {
 		const char* pos = bytes.data();
 		const char* end = pos + bytes.size();
-		return is_serialised(&pos, end);
+		return is_serialized(&pos, end);
 	}
 
 	std::string to_string() const;
-	std::string serialise() const;
+	std::string serialize() const;
 
-	static UUID unserialise(std::string_view bytes);
-	static UUID unserialise(const char** ptr, const char* end);
+	static UUID unserialize(std::string_view bytes);
+	static UUID unserialize(const char** ptr, const char* end);
 
-	// unserialise a serialised uuid's list
+	// unserialize a serialized uuid's list
 	template <typename OutputIt>
-	static void unserialise(const char** ptr, const char* end, OutputIt d_first) {
+	static void unserialize(const char** ptr, const char* end, OutputIt d_first) {
 		while (*ptr != end) {
-			*d_first++ = unserialise(ptr, end);
+			*d_first++ = unserialize(ptr, end);
 		}
 	}
 
 	template <typename OutputIt>
-	static void unserialise(std::string_view serialised, OutputIt d_first) {
-		const char* pos = serialised.data();
-		const char* end = pos + serialised.size();
-		unserialise(&pos, end, d_first);
+	static void unserialize(std::string_view serialized, OutputIt d_first) {
+		const char* pos = serialized.data();
+		const char* end = pos + serialized.size();
+		unserialize(&pos, end, d_first);
 	}
 
 	void compact_crush();
@@ -132,13 +132,13 @@ private:
 	// make the << operator a friend so it can access _bytes
 	friend std::ostream &operator<<(std::ostream& os, const UUID& uuid);
 
-	// Aux functions for serialise/unserialise UUIDs.
+	// Aux functions for serialize/unserialize UUIDs.
 
-	std::string serialise_full() const;
-	std::string serialise_condensed() const;
+	std::string serialize_full() const;
+	std::string serialize_condensed() const;
 
-	static UUID unserialise_full(const char** ptr, const char* end);
-	static UUID unserialise_condensed(const char** ptr, const char* end);
+	static UUID unserialize_full(const char** ptr, const char* end);
+	static UUID unserialize_condensed(const char** ptr, const char* end);
 };
 
 

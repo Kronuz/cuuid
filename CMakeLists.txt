@@ -92,7 +92,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 	add_executable(cuuid_demo examples/demo.cc)
 	target_link_libraries(cuuid_demo PRIVATE cuuid)
 
-	add_executable(cuuid_benchmark benchmarks/serialise_parse.cc)
+	add_executable(cuuid_benchmark benchmarks/serialize_parse.cc)
 	target_link_libraries(cuuid_benchmark PRIVATE cuuid)
 
 	add_executable(cuuid_v1_bench benchmarks/v1_bench.cc)

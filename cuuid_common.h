@@ -23,7 +23,7 @@
  */
 
 // Format-agnostic pieces shared by the cuuid v1 and v6 codecs: the condensed-UUID
-// bit layout (UUIDCondenser), its variable-length wire serialise/unserialise, and the
+// bit layout (UUIDCondenser), its variable-length wire serialize/unserialize, and the
 // small primitives (pack/unpack, fnv_1a, xor_fold, splitmix64). The only per-version
 // knob is the node expander passed to calculate_node(): v1 supplies a std::mt19937
 // expander, v6 supplies splitmix64. Everything else is identical between the formats.
@@ -56,7 +56,7 @@
 constexpr uint64_t UUID_TIME_EPOCH             = 0x01b21dd213814000ULL;
 constexpr uint64_t UUID_TIME_YEAR              = 0x00011f0241243c00ULL;
 constexpr uint64_t UUID_TIME_INITIAL           = UUID_TIME_EPOCH + (2016 - 1970) * UUID_TIME_YEAR;
-constexpr uint8_t  UUID_MAX_SERIALISED_LENGTH  = 17;
+constexpr uint8_t  UUID_MAX_SERIALIZED_LENGTH  = 17;
 
 constexpr uint8_t TIME_BITS       = 60;
 constexpr uint8_t PADDING_C0_BITS = 64 - TIME_BITS;
@@ -221,8 +221,8 @@ union UUIDCondenser {
 		uint64_t clock       : CLOCK_BITS;
 	} expanded;
 
-	std::string serialise() const;
-	static UUIDCondenser unserialise(const char** ptr, const char* end);
+	std::string serialize() const;
+	static UUIDCondenser unserialize(const char** ptr, const char* end);
 
 	UUIDCondenser();
 };

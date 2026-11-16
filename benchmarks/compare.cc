@@ -2,7 +2,7 @@
 //
 // Measures four things across the three ID schemes:
 //   A. generation throughput
-//   B. serialise + parse throughput
+//   B. serialize + parse throughput
 //   C. wire-size distribution (cuuid best/worst are time-dependent)
 //   D. wire-size vs. year, to expose cuuid's time-dependence directly
 //   E. byte-sortability (does lexicographic wire order match creation order?)
@@ -185,7 +185,7 @@ int main() {
 		std::printf("   (sink=%llu)\n\n", static_cast<unsigned long long>(sink));
 	}
 
-	// ---------- B. Serialise + parse throughput ----------
+	// ---------- B. Serialize + parse throughput ----------
 	{
 		// cuuid compact: current-time v1, compacted.
 		std::vector<UUID> cu_c;
@@ -223,11 +223,11 @@ int main() {
 			(void)sink;
 		};
 
-		std::printf("B. Serialise / parse (ns/op) and avg wire bytes\n");
-		bench("cuuid compact", [&](std::size_t i){ return cu_c[i].serialise(); },
-		      [&](const std::string& w){ return static_cast<uint64_t>(UUID::unserialise(w).uuid1_clock_seq()); }, N);
-		bench("cuuid expanded", [&](std::size_t i){ return cu_e[i].serialise(); },
-		      [&](const std::string& w){ return static_cast<uint64_t>(UUID::unserialise(w).uuid1_clock_seq()); }, N);
+		std::printf("B. Serialize / parse (ns/op) and avg wire bytes\n");
+		bench("cuuid compact", [&](std::size_t i){ return cu_c[i].serialize(); },
+		      [&](const std::string& w){ return static_cast<uint64_t>(UUID::unserialize(w).uuid1_clock_seq()); }, N);
+		bench("cuuid expanded", [&](std::size_t i){ return cu_e[i].serialize(); },
+		      [&](const std::string& w){ return static_cast<uint64_t>(UUID::unserialize(w).uuid1_clock_seq()); }, N);
 		bench("UUIDv7 (16B fixed)", [&](std::size_t i){ return std::string(reinterpret_cast<const char*>(v7[i].b.data()), 16); },
 		      [&](const std::string& w){ uint64_t x; std::memcpy(&x, w.data(), 8); return x; }, N);
 		bench("Snowflake (8B fixed)", [&](std::size_t i){ return snowflake_wire(sf[i]); },
@@ -241,11 +241,11 @@ int main() {
 		for (std::size_t i = 0; i < N; ++i) {
 			UUID uc = make_v1(now_greg, static_cast<uint16_t>(i & 0x3fff), 0);
 			uc.compact_crush();
-			std::size_t cs = uc.serialise().size();
+			std::size_t cs = uc.serialize().size();
 			cmin = std::min(cmin, cs); cmax = std::max(cmax, cs); csum += cs;
 
 			UUID ue = make_v1(now_greg, static_cast<uint16_t>(i & 0x3fff), 0x010000000000ULL | (rng() & 0xffffffffffULL));
-			std::size_t es = ue.serialise().size();
+			std::size_t es = ue.serialize().size();
 			emin = std::min(emin, es); emax = std::max(emax, es); esum += es;
 		}
 		std::printf("C. Wire size at current time (bytes)\n");
@@ -260,7 +260,7 @@ int main() {
 		for (int year : {2016, 2018, 2020, 2024, 2026, 2030, 2040, 2060, 2100}) {
 			UUID u = make_v1(greg_for_year(year), 0x1234, 0);
 			u.compact_crush();
-			std::printf("   year %4d  ->  %zu bytes\n", year, u.serialise().size());
+			std::printf("   year %4d  ->  %zu bytes\n", year, u.serialize().size());
 		}
 		std::printf("\n");
 	}
@@ -280,10 +280,10 @@ int main() {
 
 			UUID uc = make_v1(greg, static_cast<uint16_t>(i & 0x3fff), 0);
 			uc.compact_crush();
-			cu_c.push_back(uc.serialise());
+			cu_c.push_back(uc.serialize());
 
 			UUID ue = make_v1(greg, static_cast<uint16_t>(i & 0x3fff), 0x010000000000ULL | 0xABCDEFULL);
-			cu_e.push_back(ue.serialise());
+			cu_e.push_back(ue.serialize());
 			v1c.push_back(std::string(reinterpret_cast<const char*>(ue.get_bytes().data()), 16)); // canonical v1 bytes
 
 			UUID16 u6 = gen_v6(greg, static_cast<uint16_t>(i & 0x3fff), 0xABCDEFULL);
@@ -322,7 +322,7 @@ int main() {
 
 			UUID uc = make_v1(greg, static_cast<uint16_t>(i & 0x3fff), 0);
 			uc.compact_crush();
-			cu_c.push_back(uc.serialise());
+			cu_c.push_back(uc.serialize());
 
 			UUID16 u6 = gen_v6(greg, static_cast<uint16_t>(i & 0x3fff), 0xABCDEFULL);
 			v6w.push_back(std::string(reinterpret_cast<const char*>(u6.b.data()), 16));
@@ -359,7 +359,7 @@ int main() {
 			for (std::size_t i = 0; i < M; ++i) {
 				UUID u = make_v1(now_greg + static_cast<uint64_t>(i) * s.step, static_cast<uint16_t>(i & 0x3fff), 0);
 				u.compact_crush();
-				w.push_back(u.serialise());
+				w.push_back(u.serialize());
 			}
 			std::printf("   step %-8s -> %.4f\n", s.label, sorted_fraction(w));
 		}

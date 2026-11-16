@@ -98,7 +98,7 @@ uint64_t expand_mt_compute(uint32_t seed) {
 
 
 // A small thread-local direct-mapped cache: generate(compact) is usually followed by
-// serialise() of the same value, and a repeated serialise/unserialise of one id
+// serialize() of the same value, and a repeated serialize/unserialize of one id
 // re-derives the same seed. The function is pure, so a hit is always exact.
 static uint64_t expand_mt(uint32_t seed) {
 	struct Entry { uint64_t node; uint32_t seed; bool valid; };
@@ -385,35 +385,35 @@ UUID::compact_crush()
 
 
 std::string
-UUID::serialise() const
+UUID::serialize() const
 {
-	L_CALL("UUID::serialise()");
+	L_CALL("UUID::serialize()");
 
 	if (uuid_variant() == 0x80 && uuid_version() == 1) {
-		return serialise_condensed();
+		return serialize_condensed();
 	}
 
-	return serialise_full();
+	return serialize_full();
 }
 
 
 std::string
-UUID::serialise_full() const
+UUID::serialize_full() const
 {
-	L_CALL("UUID::serialise_full()");
+	L_CALL("UUID::serialize_full()");
 
-	std::string serialised;
-	serialised.reserve(17);
-	serialised.push_back(0x01);
-	serialised.append(reinterpret_cast<const char*>(&_bytes[0]), 16);
-	return serialised;
+	std::string serialized;
+	serialized.reserve(17);
+	serialized.push_back(0x01);
+	serialized.append(reinterpret_cast<const char*>(&_bytes[0]), 16);
+	return serialized;
 }
 
 
 std::string
-UUID::serialise_condensed() const
+UUID::serialize_condensed() const
 {
-	L_CALL("UUID::serialise_condensed()");
+	L_CALL("UUID::serialize_condensed()");
 
 	return condense(uuid1_time(), uuid1_clock_seq(), uuid1_node(), expand_mt);
 }
@@ -471,7 +471,7 @@ UUID::is_valid(const char** ptr, const char* end)
 
 
 static inline bool
-_is_serialised(const char** ptr, const char* end)
+_is_serialized(const char** ptr, const char* end)
 {
 	auto size = end - *ptr;
 	if (size < 2) {
@@ -499,10 +499,10 @@ _is_serialised(const char** ptr, const char* end)
 
 
 bool
-UUID::is_serialised(const char** ptr, const char* end)
+UUID::is_serialized(const char** ptr, const char* end)
 {
 	while (*ptr != end) {
-		if (!_is_serialised(ptr, end)) {
+		if (!_is_serialized(ptr, end)) {
 			return false;
 		}
 	}
@@ -511,40 +511,40 @@ UUID::is_serialised(const char** ptr, const char* end)
 
 
 UUID
-UUID::unserialise(std::string_view bytes)
+UUID::unserialize(std::string_view bytes)
 {
 	const char* pos = bytes.data();
 	const char* end = pos + bytes.size();
-	return unserialise(&pos, end);
+	return unserialize(&pos, end);
 }
 
 
 UUID
-UUID::unserialise(const char** ptr, const char* end)
+UUID::unserialize(const char** ptr, const char* end)
 {
-	L_CALL("UUID::unserialise({})", repr(*ptr, end));
+	L_CALL("UUID::unserialize({})", repr(*ptr, end));
 
 	auto size = end - *ptr;
 	if (size < 2) {
-		THROW(SerialisationError, "Bad encoded UUID");
+		THROW(SerializationError, "Bad encoded UUID");
 	}
 
 	if (**ptr == 1) {
-		return unserialise_full(ptr, end);
+		return unserialize_full(ptr, end);
 	}
 
-	return unserialise_condensed(ptr, end);
+	return unserialize_condensed(ptr, end);
 }
 
 
 UUID
-UUID::unserialise_full(const char** ptr, const char* end)
+UUID::unserialize_full(const char** ptr, const char* end)
 {
-	L_CALL("UUID::unserialise_full({})", repr(*ptr, end));
+	L_CALL("UUID::unserialize_full({})", repr(*ptr, end));
 
 	auto size = end - *ptr;
 	if (size < 17) {
-		THROW(SerialisationError, "Bad encoded UUID");
+		THROW(SerializationError, "Bad encoded UUID");
 	}
 
 	UUID out;
@@ -556,9 +556,9 @@ UUID::unserialise_full(const char** ptr, const char* end)
 
 
 UUID
-UUID::unserialise_condensed(const char** ptr, const char* end)
+UUID::unserialize_condensed(const char** ptr, const char* end)
 {
-	L_CALL("UUID::unserialise_condensed({})", repr(*ptr, end));
+	L_CALL("UUID::unserialize_condensed({})", repr(*ptr, end));
 
 	uint64_t time, node;
 	uint16_t clock;

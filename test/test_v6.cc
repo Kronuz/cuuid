@@ -47,11 +47,11 @@ static void test_v6_round_trip() {
 		CHECK(uuid.uuid_version() == 6);
 		CHECK(uuid.uuid_variant() == 0x80);
 
-		const std::string wire = cuuid_v6::serialise(uuid);
+		const std::string wire = cuuid_v6::serialize(uuid);
 		CHECK(!wire.empty());
 		CHECK(static_cast<unsigned char>(wire[0]) != 0x00); // base59-safe leading byte
 
-		UUID decoded = cuuid_v6::unserialise(wire);
+		UUID decoded = cuuid_v6::unserialize(wire);
 		CHECK(decoded == uuid);
 	}
 }
@@ -68,7 +68,7 @@ static void test_v6_expanded_round_trip() {
 		UUID uuid = cuuid_v6::from_fields(time, clock, node);
 		CHECK(uuid.uuid_version() == 6);
 
-		UUID decoded = cuuid_v6::unserialise(cuuid_v6::serialise(uuid));
+		UUID decoded = cuuid_v6::unserialize(cuuid_v6::serialize(uuid));
 		CHECK(decoded == uuid);
 	}
 }
@@ -80,7 +80,7 @@ static void test_v6_sortable() {
 	for (int i = 0; i < 50000; ++i) {
 		uint64_t time = (base + static_cast<uint64_t>(i) * 500000ULL) & ((1ULL << 60) - 1);
 		UUID uuid = cuuid_v6::make(time, 0x1abc, 0x0123456789abULL);
-		std::string wire = cuuid_v6::serialise(uuid);
+		std::string wire = cuuid_v6::serialize(uuid);
 		if (!prev.empty()) {
 			CHECK(prev <= wire);
 		}
@@ -112,7 +112,7 @@ static void test_v6_canonical_order() {
 				CHECK(prev_bytes < bytes);  // different windows: in time order
 			}
 			CHECK(seen.insert(bytes).second);  // distinct inside and across windows
-			CHECK(cuuid_v6::unserialise(cuuid_v6::serialise(uuid)) == uuid);
+			CHECK(cuuid_v6::unserialize(cuuid_v6::serialize(uuid)) == uuid);
 			prev_bytes = bytes;
 			prev_window = w;
 		}
@@ -128,8 +128,8 @@ static void test_v6_generator() {
 		CHECK(!uuid.empty());
 		CHECK(uuid.uuid_version() == 6);
 		CHECK(uuid.uuid_variant() == 0x80);
-		const std::string wire = cuuid_v6::serialise(uuid);
-		CHECK(cuuid_v6::unserialise(wire) == uuid);
+		const std::string wire = cuuid_v6::serialize(uuid);
+		CHECK(cuuid_v6::unserialize(wire) == uuid);
 		seen.insert(wire);
 	}
 	CHECK(seen.size() == static_cast<size_t>(N));
@@ -138,24 +138,24 @@ static void test_v6_generator() {
 // The umbrella dispatch routes by the version nibble on encode, and by the running codec on
 // decode; v1 ids stay on the v1 path and the full form is read the same either way.
 static void test_dispatch() {
-	// A v6 id: cuuid::serialise picks the v6 codec.
+	// A v6 id: cuuid::serialize picks the v6 codec.
 	UUID v6 = cuuid_v6::make(rand_time(), 0x0abc, 0x0123456789abULL);
-	CHECK(cuuid::serialise(v6) == cuuid_v6::serialise(v6));
-	CHECK(cuuid::unserialise(cuuid::serialise(v6), cuuid::Codec::v6) == v6);
+	CHECK(cuuid::serialize(v6) == cuuid_v6::serialize(v6));
+	CHECK(cuuid::unserialize(cuuid::serialize(v6), cuuid::Codec::v6) == v6);
 
-	// A v1 id: cuuid::serialise falls through to the v1 path, and decodes under Codec::v1.
+	// A v1 id: cuuid::serialize falls through to the v1 path, and decodes under Codec::v1.
 	UUIDGenerator gen;
 	UUID v1 = gen(true);
 	CHECK(v1.uuid_version() == 1);
-	CHECK(cuuid::serialise(v1) == v1.serialise());
-	CHECK(cuuid::unserialise(cuuid::serialise(v1), cuuid::Codec::v1) == v1);
+	CHECK(cuuid::serialize(v1) == v1.serialize());
+	CHECK(cuuid::unserialize(cuuid::serialize(v1), cuuid::Codec::v1) == v1);
 
 	// The full (uncompacted) form is self-describing: same result under either codec.
 	UUID full("3c0f2be3-ff4f-40ab-b157-c51a81eff176");
-	const std::string f = full.serialise();
+	const std::string f = full.serialize();
 	CHECK(static_cast<unsigned char>(f[0]) == 0x01);
-	CHECK(cuuid::unserialise(f, cuuid::Codec::v1) == full);
-	CHECK(cuuid::unserialise(f, cuuid::Codec::v6) == full);
+	CHECK(cuuid::unserialize(f, cuuid::Codec::v1) == full);
+	CHECK(cuuid::unserialize(f, cuuid::Codec::v6) == full);
 }
 
 int main() {

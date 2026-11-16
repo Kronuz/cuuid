@@ -139,7 +139,7 @@ def tag_space_report() -> None:
             return True
         q = (
             1 if (b & 0xF0) else 0
-        )  # mirrors unserialise_condensed's first-byte dispatch
+        )  # mirrors unserialize_condensed's first-byte dispatch
         return any(pref == (b & mask) for pref, mask in (vl[i][q] for i in range(13)))
 
     invalid = [b for b in range(256) if not valid_v1(b)]

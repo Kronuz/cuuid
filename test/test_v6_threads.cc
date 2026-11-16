@@ -1,6 +1,6 @@
 // cuuid_v6::generate() under threads.
 //
-// T threads each mint M ids at once. The platform mint is serialised inside UUIDGenerator, and
+// T threads each mint M ids at once. The platform mint is serialized inside UUIDGenerator, and
 // generate() then claims max(time, last + 1) for each id with a CAS, so:
 //   - every id (its 16 bytes) and every condensed wire is distinct across all threads;
 //   - the claimed 100 ns time of every id is unique across all threads and strictly increasing
@@ -78,9 +78,9 @@ int main() {
 			if (u.uuid_version() != 6 || u.uuid_variant() != 0x80) ++malformed;
 			const auto& raw = u.get_bytes();
 			if (!bytes_seen.insert(std::string(reinterpret_cast<const char*>(raw.data()), raw.size())).second) ++duplicate_bytes;
-			const std::string wire = cuuid_v6::serialise(u);
+			const std::string wire = cuuid_v6::serialize(u);
 			if (!wires_seen.insert(wire).second) ++duplicate_wires;
-			if (!(cuuid_v6::unserialise(wire) == u)) ++bad_round_trip;
+			if (!(cuuid_v6::unserialize(wire) == u)) ++bad_round_trip;
 			const u64 time = claimed_time(u, process_clock);
 			if (!times_seen.insert(time).second) ++duplicate_times;
 			if (i && time <= previous) ++not_increasing;

@@ -60,9 +60,9 @@ calculate_node(const UUIDCondenser& condenser, NodeExpander expand)
 
 
 std::string
-UUIDCondenser::serialise() const
+UUIDCondenser::serialize() const
 {
-	L_CALL("UUIDCondenser::serialise()");
+	L_CALL("UUIDCondenser::serialize()");
 
 	uint64_t buf0, buf1;
 	if (compact.compacted != 0u) {
@@ -83,7 +83,7 @@ UUIDCondenser::serialise() const
 		buf1 = (value.val0 << (64 - PADDING_E1_BITS)) | (value.val1 >> PADDING_E1_BITS);
 	}
 
-	char buf[UUID_MAX_SERIALISED_LENGTH];
+	char buf[UUID_MAX_SERIALIZED_LENGTH];
 
 	char* end = buf;
 	*end++ = '\0';
@@ -112,9 +112,9 @@ UUIDCondenser::serialise() const
 
 
 UUIDCondenser
-UUIDCondenser::unserialise(const char** ptr, const char* end)
+UUIDCondenser::unserialize(const char** ptr, const char* end)
 {
-	L_CALL("UUIDCondenser::unserialise({})", repr(*ptr, end));
+	L_CALL("UUIDCondenser::unserialize({})", repr(*ptr, end));
 
 	auto size = end - *ptr;
 	auto length = size + 1;
@@ -128,11 +128,11 @@ UUIDCondenser::unserialise(const char** ptr, const char* end)
 		}
 	}
 	if (size < length) {
-		THROW(SerialisationError, "Bad condensed UUID");
+		THROW(SerializationError, "Bad condensed UUID");
 	}
 
-	char buf[UUID_MAX_SERIALISED_LENGTH];
-	auto start = buf + UUID_MAX_SERIALISED_LENGTH - length;
+	char buf[UUID_MAX_SERIALIZED_LENGTH];
+	auto start = buf + UUID_MAX_SERIALIZED_LENGTH - length;
 	std::fill(buf, start, 0);
 	std::copy_n(*ptr, length, start);
 
@@ -223,7 +223,7 @@ condense(uint64_t time, uint16_t clock, uint64_t node, NodeExpander expand)
 		condenser.expanded.node = node;
 	}
 
-	return condenser.serialise();
+	return condenser.serialize();
 }
 
 
@@ -232,7 +232,7 @@ uncondense(const char** ptr, const char* end, uint64_t& time, uint16_t& clock, u
 {
 	L_CALL("uncondense({})", repr(*ptr, end));
 
-	UUIDCondenser condenser = UUIDCondenser::unserialise(ptr, end);
+	UUIDCondenser condenser = UUIDCondenser::unserialize(ptr, end);
 
 	uint64_t n = condenser.compact.compacted != 0u ? calculate_node(condenser, expand) : condenser.expanded.node;
 

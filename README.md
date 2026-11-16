@@ -24,7 +24,7 @@ billions of ids as small, sorted keys when you control both ends of the wire.
   encode and 12 ns to decode on an Apple M4 Pro.
 - **v1, frozen.** Xapiand's original codec, byte for byte, for existing data (`Codec::v1`).
 - **Fast text form.** Parses the 36-character form 7x to 8x faster than Boost.UUID.
-- **Validators and accessors.** `is_valid()`, `is_serialised()`, and the v1 node, time, clock
+- **Validators and accessors.** `is_valid()`, `is_serialized()`, and the v1 node, time, clock
   sequence, variant and version fields.
 
 ## 🚀 Quick start
@@ -38,8 +38,8 @@ billions of ids as small, sorted keys when you control both ends of the wire.
 
 int main() {
 	UUID id = cuuid::generate();                   // v6
-	std::string wire = cuuid::serialise(id);       // condensed, sorts by time
-	assert(cuuid::unserialise(wire) == id);
+	std::string wire = cuuid::serialize(id);       // condensed, sorts by time
+	assert(cuuid::unserialize(wire) == id);
 	std::cout << id << " -> " << wire.size() << " bytes\n";   // 1f1d5ec3-e6e4-6800-8d52-23423e0d9762 -> 8 bytes
 }
 ```

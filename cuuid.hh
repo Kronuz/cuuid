@@ -25,7 +25,7 @@
 // Umbrella entry point that dispatches between the cuuid v1 and v6 codecs. v1 and v6 are
 // told apart on ENCODE by the standard UUID version nibble (1 vs 6); the condensed wire
 // carries no version marker, so on DECODE the running Codec selects it (Codec::v1 is the
-// pure-legacy "--legacy-ids" mode). The full serialised form (0x01 lead byte) embeds the
+// pure-legacy "--legacy-ids" mode). The full serialized form (0x01 lead byte) embeds the
 // 16 raw bytes and is read the same way under either codec.
 
 #pragma once
@@ -44,44 +44,44 @@ enum class Codec { v1, v6 };
 
 // Encode-side dispatch by the version nibble: a version-6 UUID gets the compact v6 wire,
 // everything else the v1 path (condensed if version 1, full form otherwise).
-inline std::string serialise(const UUID& uuid) {
+inline std::string serialize(const UUID& uuid) {
 	if (uuid.uuid_variant() == 0x80 && uuid.uuid_version() == 6) {
-		return cuuid_v6::serialise(uuid);
+		return cuuid_v6::serialize(uuid);
 	}
-	return uuid.serialise();
+	return uuid.serialize();
 }
 
 
 // Decode with the running codec. Only a condensed wire under Codec::v6 goes to the v6
 // decoder; the full form (0x01), an empty/short buffer, and Codec::v1 all use v1's reader
 // (which handles the full form, v1-condensed, and the error cases).
-inline UUID unserialise(const char** ptr, const char* end, Codec codec = Codec::v6) {
+inline UUID unserialize(const char** ptr, const char* end, Codec codec = Codec::v6) {
 	if (codec == Codec::v6 && *ptr != end && static_cast<unsigned char>(**ptr) != 0x01) {
-		return cuuid_v6::unserialise(ptr, end);
+		return cuuid_v6::unserialize(ptr, end);
 	}
-	return UUID::unserialise(ptr, end);
+	return UUID::unserialize(ptr, end);
 }
 
-inline UUID unserialise(std::string_view bytes, Codec codec = Codec::v6) {
+inline UUID unserialize(std::string_view bytes, Codec codec = Codec::v6) {
 	const char* pos = bytes.data();
 	const char* end = pos + bytes.size();
-	return unserialise(&pos, end, codec);
+	return unserialize(&pos, end, codec);
 }
 
 
-// Decode a serialised list of UUIDs (the wire may pack several back to back).
+// Decode a serialized list of UUIDs (the wire may pack several back to back).
 template <typename OutputIt>
-inline void unserialise(const char** ptr, const char* end, OutputIt d_first, Codec codec = Codec::v6) {
+inline void unserialize(const char** ptr, const char* end, OutputIt d_first, Codec codec = Codec::v6) {
 	while (*ptr != end) {
-		*d_first++ = unserialise(ptr, end, codec);
+		*d_first++ = unserialize(ptr, end, codec);
 	}
 }
 
 template <typename OutputIt>
-inline void unserialise(std::string_view bytes, OutputIt d_first, Codec codec = Codec::v6) {
+inline void unserialize(std::string_view bytes, OutputIt d_first, Codec codec = Codec::v6) {
 	const char* pos = bytes.data();
 	const char* end = pos + bytes.size();
-	unserialise(&pos, end, d_first, codec);
+	unserialize(&pos, end, d_first, codec);
 }
 
 

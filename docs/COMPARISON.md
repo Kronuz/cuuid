@@ -8,9 +8,9 @@
 
 `cuuid` is not an ID-generation scheme in the sense Snowflake or UUIDv7 are. It generates a plain **RFC 4122 version-1** UUID (via `uuid_generate_time`) and adds one distinctive thing on top: a **condensed, variable-length wire codec**. That codec is where all the interest, and all the argument, lives.
 
-Timings are from an Apple M4 Pro, Apple clang 17 with `-O3 -DNDEBUG`, measured on an otherwise idle machine at `d03d8d1` (`cuuid_compare` and `cuuid_v1_bench`). The v1 codec computes only the 399 `std::mt19937` state words the node needs, so a `serialise` of a new id takes about 620 ns and of a repeated id about 10 ns.
+Timings are from an Apple M4 Pro, Apple clang 17 with `-O3 -DNDEBUG`, measured on an otherwise idle machine at `d03d8d1` (`cuuid_compare` and `cuuid_v1_bench`). The v1 codec computes only the 399 `std::mt19937` state words the node needs, so a `serialize` of a new id takes about 620 ns and of a repeated id about 10 ns.
 
-- **Size.** A compacted cuuid is **8 bytes** for any present-day timestamp, the same as a 64-bit Snowflake and half of UUIDv7's 16, but without Snowflake's worker-id coordination. The often-quoted 4-byte figure is real only for timestamps within about a year of cuuid's 2016 epoch; the existing `serialise_parse` benchmark hits it because it feeds near-zero timestamps.
+- **Size.** A compacted cuuid is **8 bytes** for any present-day timestamp, the same as a 64-bit Snowflake and half of UUIDv7's 16, but without Snowflake's worker-id coordination. The often-quoted 4-byte figure is real only for timestamps within about a year of cuuid's 2016 epoch; the existing `serialize_parse` benchmark hits it because it feeds near-zero timestamps.
 - **Sortable? Yes.** The condensed wire puts time in the most-significant bits, so it sorts lexicographically by creation time, down to a **~1.64 ms** resolution floor. This is the answer to "can cuuid be sorted like Snowflake": on the wire, yes. In its **canonical 16-byte v1 form, no** (the classic v1 problem UUIDv6 exists to fix), which is exactly what the shipped **v6** format cures by storing the bytes in UUIDv6 order.
 - **Cost.** The compact path costs **~620 ns to encode and to decode**, versus single-digit nanoseconds for Snowflake, UUIDv7, UUIDv6, and ULID. Nearly all of it is the node derivation inside `calculate_node()`: the first two outputs of `std::mt19937(seed)`. Constructing the full engine takes ~930 ns, and swapping in a cheap mixer (splitmix64) does the identical job in **~2 ns**. The **v6 format** does this (see [Two ways forward](#two-ways-forward)): reconstructing the node with splitmix64, plus byteswapping the condenser's two 64-bit words (a single `bswap` instead of a byte loop), makes the whole compact path **~11 ns to encode and ~12 ns to decode** (4,096 distinct ids), roughly 50x faster. It changes the reconstructed node bytes, so it is a new format, told apart from v1 by the standard UUID version nibble rather than a drop-in patch.
 
@@ -42,7 +42,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build && ./build/cuui
 
 ### Generation and codec
 
-| Scheme | generate | serialise | parse | wire bytes |
+| Scheme | generate | serialize | parse | wire bytes |
 |---|---|---|---|---|
 | cuuid v1, no compact | 91 | 621 | 11 | 16 |
 | cuuid v1, compact | 682 | 621 | 624 | 8 |
@@ -51,7 +51,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build && ./build/cuui
 | ULID | 5.0 | ~0 | ~0 | 16 |
 | Snowflake | 0.7 | 1.0 | 2.8 | 8 |
 
-Two things stand out. First, cuuid's codec is two to three orders of magnitude more expensive than the others, on both encode and decode. Second, even the **expanded** (non-compacted) serialise costs ~620 ns, because `serialise_condensed()` always calls `calculate_node()` to decide between the compact and expanded layouts, and that call is the expensive one.
+Two things stand out. First, cuuid's codec is two to three orders of magnitude more expensive than the others, on both encode and decode. Second, even the **expanded** (non-compacted) serialize costs ~620 ns, because `serialize_condensed()` always calls `calculate_node()` to decide between the compact and expanded layouts, and that call is the expensive one.
 
 ### Wire size is time-dependent
 
@@ -162,7 +162,7 @@ I built that v2 as a standalone prototype (`prototype/cuuid_v2.hh` and `prototyp
 
 Two things must hold when a format changes: the ids already on disk must keep decoding, and the new ids must survive Xapiand's `~` text encoding. That text form turns out to constrain the wire more than the binary side does, and it is worth walking through because it overturns an obvious-looking design.
 
-Xapiand renders a serialised id as `~` followed by the **base59** of the wire bytes (`ENCODER = base_x.b59`). base59 folds the bytes into one big integer, so a **leading zero byte contributes nothing and cannot be recovered**. That single fact drives everything: the wire's first byte must be nonzero.
+Xapiand renders a serialized id as `~` followed by the **base59** of the wire bytes (`ENCODER = base_x.b59`). base59 folds the bytes into one big integer, so a **leading zero byte contributes nothing and cannot be recovered**. That single fact drives everything: the wire's first byte must be nonzero.
 
 Now, the tempting way to version a new format is a leading tag byte, and there is exactly one byte that no v1 wire can start with. The tag space is only 256 values, so this is settled exhaustively, not sampled:
 

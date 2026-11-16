@@ -12,7 +12,7 @@ cond: "condense\ndrop the derivable node bits"
 expand: "expand\nrebuild the node\nv6: splitmix64 · v1: mt19937"
 wire: "wire form, about 8 bytes\ntime first, so it sorts"
 
-uuid -> cond: serialise
+uuid -> cond: serialize
 cond -> wire
-wire -> expand: unserialise
+wire -> expand: unserialize
 expand -> uuid

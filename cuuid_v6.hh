@@ -47,7 +47,7 @@ namespace cuuid_v6 {
 // timestamp, as UUID::uuid1_time() returns.
 UUID from_fields(uint64_t time, uint16_t clock, uint64_t node);
 
-// Same, but compacted: the node is reconstructed with splitmix64 so serialise() yields the
+// Same, but compacted: the node is reconstructed with splitmix64 so serialize() yields the
 // minimal compact wire.
 UUID make(uint64_t time, uint16_t clock, uint64_t node);
 
@@ -55,10 +55,10 @@ UUID make(uint64_t time, uint16_t clock, uint64_t node);
 UUID generate();
 
 // Condensed v6 wire for a v6 UUID (shared condenser + splitmix64 expander).
-std::string serialise(const UUID& uuid);
+std::string serialize(const UUID& uuid);
 
 // Decode a condensed v6 wire into a v6 UUID; advances *ptr past the consumed bytes.
-UUID unserialise(const char** ptr, const char* end);
-UUID unserialise(std::string_view bytes);
+UUID unserialize(const char** ptr, const char* end);
+UUID unserialize(std::string_view bytes);
 
 } // namespace cuuid_v6

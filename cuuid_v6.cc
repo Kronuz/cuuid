@@ -126,7 +126,7 @@ generate()
 
 
 std::string
-serialise(const UUID& uuid)
+serialize(const UUID& uuid)
 {
 	uint64_t time, node;
 	uint16_t clock;
@@ -136,7 +136,7 @@ serialise(const UUID& uuid)
 
 
 UUID
-unserialise(const char** ptr, const char* end)
+unserialize(const char** ptr, const char* end)
 {
 	uint64_t time, node;
 	uint16_t clock;
@@ -146,11 +146,11 @@ unserialise(const char** ptr, const char* end)
 
 
 UUID
-unserialise(std::string_view bytes)
+unserialize(std::string_view bytes)
 {
 	const char* pos = bytes.data();
 	const char* end = pos + bytes.size();
-	return unserialise(&pos, end);
+	return unserialize(&pos, end);
 }
 
 } // namespace cuuid_v6

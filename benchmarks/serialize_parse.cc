@@ -23,20 +23,20 @@ int main() {
 	auto start = std::chrono::steady_clock::now();
 	std::size_t total_bytes = 0;
 	for (const auto& uuid : uuids) {
-		wires.push_back(uuid.serialise());
+		wires.push_back(uuid.serialize());
 		total_bytes += wires.back().size();
 	}
 	auto mid = std::chrono::steady_clock::now();
 
 	std::size_t checksum = 0;
 	for (const auto& wire : wires) {
-		checksum += UUID::unserialise(wire).uuid1_clock_seq();
+		checksum += UUID::unserialize(wire).uuid1_clock_seq();
 	}
 	auto end = std::chrono::steady_clock::now();
 
-	auto serialise_us = std::chrono::duration_cast<std::chrono::microseconds>(mid - start).count();
+	auto serialize_us = std::chrono::duration_cast<std::chrono::microseconds>(mid - start).count();
 	auto parse_us = std::chrono::duration_cast<std::chrono::microseconds>(end - mid).count();
 	std::cout << "uuids=" << count << " bytes=" << total_bytes << " checksum=" << checksum << '\n';
-	std::cout << "serialise_us=" << serialise_us << " parse_us=" << parse_us << '\n';
+	std::cout << "serialize_us=" << serialize_us << " parse_us=" << parse_us << '\n';
 	return 0;
 }

@@ -64,12 +64,12 @@ static void test_wire_identical() {
 		uuid.uuid_variant(0x80);
 		uuid.uuid_version(1);
 
-		const std::string wire = uuid.serialise();
+		const std::string wire = uuid.serialize();
 		CHECK(wire == condense(time, clock, node, reference_expand));
 
-		// Serialising again (cache hit) and decoding give the same bytes / value.
-		CHECK(uuid.serialise() == wire);
-		UUID back = UUID::unserialise(wire);
+		// Serializing again (cache hit) and decoding give the same bytes / value.
+		CHECK(uuid.serialize() == wire);
+		UUID back = UUID::unserialize(wire);
 		const char* p = wire.data();
 		uint64_t t2, n2; uint16_t c2;
 		uncondense(&p, wire.data() + wire.size(), t2, c2, n2, reference_expand);

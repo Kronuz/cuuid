@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
 
 				UUID uc = make_v1(greg, clk, 0x010000000000ULL | (r() & 0xffffffffffULL));
 				uc.compact_crush();
-				v1_fb.insert(static_cast<uint8_t>(uc.serialise()[0]));
+				v1_fb.insert(static_cast<uint8_t>(uc.serialize()[0]));
 
 				cuuid_v2::Id id{greg, clk, 0x020000000000ULL | (r() & 0xffffffffffULL)};
 				cuuid_v2::crush(id);
@@ -148,7 +148,7 @@ int main(int argc, char** argv) {
 			std::printf("%llu\t%u\t%llu\t%s\t%s\n",
 			            static_cast<unsigned long long>(greg), c.clock,
 			            static_cast<unsigned long long>(c.node),
-			            u.to_string().c_str(), hex(u.serialise()).c_str());
+			            u.to_string().c_str(), hex(u.serialize()).c_str());
 		}
 		return 0;
 	}
@@ -232,12 +232,12 @@ int main(int argc, char** argv) {
 		auto a0 = clk::now();
 		for (auto& id : ids) w2.push_back(cuuid_v2::encode(id));
 		auto a1 = clk::now();
-		for (auto& u : v1) w1.push_back(u.serialise());
+		for (auto& u : v1) w1.push_back(u.serialize());
 		auto a2 = clk::now();
 		volatile uint64_t sink = 0;
 		for (auto& w : w2) sink ^= cuuid_v2::decode(w).clock;
 		auto a3 = clk::now();
-		for (auto& w : w1) sink ^= UUID::unserialise(w).uuid1_clock_seq();
+		for (auto& w : w1) sink ^= UUID::unserialize(w).uuid1_clock_seq();
 		auto a4 = clk::now();
 
 		std::printf("2. Codec speed (ns/op)\n");
@@ -268,7 +268,7 @@ int main(int argc, char** argv) {
 
 			UUID u1 = make_v1(t, static_cast<uint16_t>(i & 0x3fff), 0);
 			u1.compact_crush();
-			v1c_total += u1.serialise().size();
+			v1c_total += u1.serialize().size();
 		}
 		std::printf("3. Sortability (1.0 = wire sorts by creation time)\n");
 		std::printf("   v2 condensed wire      %.4f\n", sorted_fraction(v2_wire));
@@ -299,7 +299,7 @@ int main(int argc, char** argv) {
 	{
 		UUID u1 = make_v1(now_greg, 0x1234, 0);
 		u1.compact_crush();
-		std::string w1 = u1.serialise();
+		std::string w1 = u1.serialize();
 
 		Id id{now_greg, 0x1234, 0x020000000000ULL | 0x55};
 		cuuid_v2::crush(id);

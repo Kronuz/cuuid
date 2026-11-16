@@ -169,7 +169,7 @@ inline Id from_v6_bytes(const std::array<uint8_t, 16>& b) {
 // separate length byte, so a v6 compact id is 8 bytes (not 9), matching v1. The table and
 // stripping logic are lifted verbatim from uuid.cc's UUIDCondenser, which is format-agnostic:
 // it length-prefixes an arbitrary big-endian value and is order-preserving (keeps the wire
-// sortable). Index 0..12 = serialised lengths 4..16.
+// sortable). Index 0..12 = serialized lengths 4..16.
 static constexpr uint8_t VL_[13][2][2] = {
 	{{0x1c, 0xfc}, {0x1c, 0xfc}}, {{0x18, 0xfc}, {0x18, 0xfc}}, {{0x14, 0xfc}, {0x14, 0xfc}},
 	{{0x10, 0xfc}, {0x10, 0xfc}}, {{0x04, 0xfc}, {0x40, 0xc0}}, {{0x0a, 0xfe}, {0xa0, 0xe0}},

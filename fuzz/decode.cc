@@ -10,7 +10,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
 	const std::string input(reinterpret_cast<const char*>(data), size);
 	const std::string_view bytes(input);
 	(void)UUID::is_valid(bytes);
-	(void)UUID::is_serialised(bytes);
+	(void)UUID::is_serialized(bytes);
 	try {
 		const UUID parsed(bytes);
 		if (UUID(parsed.to_string()) != parsed) { std::abort(); }
@@ -21,13 +21,13 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
 		try {
 			while (position != end) {
 				const char* before = position;
-				const UUID value = cuuid::unserialise(&position, end, codec);
+				const UUID value = cuuid::unserialize(&position, end, codec);
 				if (position <= before || position > end) { std::abort(); }
 				if (UUID(value.to_string()) != value) { std::abort(); }
 			}
-		} catch (const cuuid::SerialisationError&) {}
-		try { (void)cuuid::unserialise(bytes, codec); }
-		catch (const cuuid::SerialisationError&) {}
+		} catch (const cuuid::SerializationError&) {}
+		try { (void)cuuid::unserialize(bytes, codec); }
+		catch (const cuuid::SerializationError&) {}
 	}
 	return 0;
 }

@@ -35,40 +35,40 @@ static void test_string_round_trip() {
 	CHECK(!UUID::is_valid("3c0f2be3-ff4f-40ab-b157-c51a81eff17x"));
 }
 
-static void test_full_serialise_round_trip() {
+static void test_full_serialize_round_trip() {
 	UUID uuid("3c0f2be3-ff4f-40ab-b157-c51a81eff176");
-	const std::string serialised = uuid.serialise();
+	const std::string serialized = uuid.serialize();
 
-	CHECK(serialised.size() == 17);
-	CHECK(static_cast<unsigned char>(serialised[0]) == 0x01);
-	CHECK(UUID::is_serialised(serialised));
-	CHECK(!UUID::is_serialised(std::string_view(serialised.data(), serialised.size() - 1)));
+	CHECK(serialized.size() == 17);
+	CHECK(static_cast<unsigned char>(serialized[0]) == 0x01);
+	CHECK(UUID::is_serialized(serialized));
+	CHECK(!UUID::is_serialized(std::string_view(serialized.data(), serialized.size() - 1)));
 
-	const char* pos = serialised.data();
-	const char* end = pos + serialised.size();
-	UUID decoded = UUID::unserialise(&pos, end);
+	const char* pos = serialized.data();
+	const char* end = pos + serialized.size();
+	UUID decoded = UUID::unserialize(&pos, end);
 	CHECK(pos == end);
 	CHECK(decoded == uuid);
 }
 
-static void test_condensed_serialise_round_trip() {
+static void test_condensed_serialize_round_trip() {
 	UUID uuid("00000000-0000-1000-8000-010000000000");
-	const std::string serialised = uuid.serialise();
+	const std::string serialized = uuid.serialize();
 
-	CHECK(!serialised.empty());
-	CHECK(serialised.size() < 17);
-	CHECK(static_cast<unsigned char>(serialised[0]) != 0x01);
-	CHECK(UUID::is_serialised(serialised));
+	CHECK(!serialized.empty());
+	CHECK(serialized.size() < 17);
+	CHECK(static_cast<unsigned char>(serialized[0]) != 0x01);
+	CHECK(UUID::is_serialized(serialized));
 
-	UUID decoded = UUID::unserialise(serialised);
+	UUID decoded = UUID::unserialize(serialized);
 	CHECK(decoded == uuid);
 
-	std::string pair = UUID("3c0f2be3-ff4f-40ab-b157-c51a81eff176").serialise();
-	pair.append(serialised);
-	CHECK(UUID::is_serialised(pair));
+	std::string pair = UUID("3c0f2be3-ff4f-40ab-b157-c51a81eff176").serialize();
+	pair.append(serialized);
+	CHECK(UUID::is_serialized(pair));
 
 	std::vector<UUID> decoded_pair;
-	UUID::unserialise(pair, std::back_inserter(decoded_pair));
+	UUID::unserialize(pair, std::back_inserter(decoded_pair));
 	CHECK(decoded_pair.size() == 2);
 	CHECK(decoded_pair[1] == uuid);
 }
@@ -97,11 +97,11 @@ static void test_generator() {
 	UUID uuid = generator(false);
 	CHECK(!uuid.empty());
 	CHECK(uuid.to_string().size() == UUID_LENGTH);
-	CHECK(UUID::unserialise(uuid.serialise()) == uuid);
+	CHECK(UUID::unserialize(uuid.serialize()) == uuid);
 }
 
 // The generator must not collide, and every generated value must survive a
-// serialise/unserialise round trip -- in both the full (compact=false) and
+// serialize/unserialize round trip -- in both the full (compact=false) and
 // compactable (compact=true) modes. Ported from Xapiand's oldtests uuid suite,
 // which checked uniqueness in bulk rather than for a single value.
 static void test_generator_uniqueness() {
@@ -112,9 +112,9 @@ static void test_generator_uniqueness() {
 		for (int i = 0; i < N; ++i) {
 			UUID uuid = generator(compact);
 			CHECK(!uuid.empty());
-			const std::string serialised = uuid.serialise();
-			CHECK(UUID::unserialise(serialised) == uuid);   // round-trips
-			seen.insert(serialised);
+			const std::string serialized = uuid.serialize();
+			CHECK(UUID::unserialize(serialized) == uuid);   // round-trips
+			seen.insert(serialized);
 		}
 		CHECK(seen.size() == static_cast<size_t>(N));        // all distinct
 	}
@@ -122,8 +122,8 @@ static void test_generator_uniqueness() {
 
 int main() {
 	test_string_round_trip();
-	test_full_serialise_round_trip();
-	test_condensed_serialise_round_trip();
+	test_full_serialize_round_trip();
+	test_condensed_serialize_round_trip();
 	test_uuid1_fields();
 	test_generator();
 	test_generator_uniqueness();
